@@ -1,7 +1,20 @@
 [project]
 name = "agroteca"
 version = "0.1.0"
-description = "Add your description here"
+description = "Eval-first bilingual agricultural RAG"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastembed>=0.8.0",
+    "pgvector>=0.5.0",
+    "psycopg[binary]>=3.3.4",
+    "pydantic-settings>=2.14.2",
+    "pymupdf>=1.28.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agroteca"]
