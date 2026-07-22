@@ -1,16 +1,13 @@
 """Stage 5 — persistence into Postgres/pgvector.
 
 `register_vector` teaches psycopg how to send numpy vectors to a VECTOR column.
-The `tsv` keyword column is built at insert time with the right language config
-(Spanish/English) so Phase 3's lexical search works per-language.
+The `tsv` keyword column is built with the language-agnostic 'simple' config so
+Phase 3's hybrid lexical search matches exact tokens consistently across ES+EN.
 """
 import psycopg
 from pgvector.psycopg import register_vector
 
 from agroteca.config import settings
-
-# Postgres text-search config per document language (fallback: 'simple').
-_TSCONFIG = {"es": "spanish", "en": "english"}
 
 
 def connect() -> psycopg.Connection:
@@ -38,8 +35,8 @@ def wipe_chunks(conn: psycopg.Connection, doc_id: str) -> None:
 
 
 def insert_chunks(conn: psycopg.Connection, rows: list[dict]) -> None:
-    """Bulk-insert chunk rows. Each row supplies its own `lang` for the tsv config."""
-    payload = [{**r, "tscfg": _TSCONFIG.get(r.get("lang"), "simple")} for r in rows]
+    """Bulk-insert chunk rows. The tsv keyword index uses the language-agnostic
+    'simple' config so hybrid lexical search matches exact tokens across ES+EN."""
     with conn.cursor() as cur:
         cur.executemany(
             """
@@ -48,8 +45,8 @@ def insert_chunks(conn: psycopg.Connection, rows: list[dict]) -> None:
                  tier, lang, topic, page, char_start, char_end)
             VALUES
                 (%(chunk_id)s, %(doc_id)s, %(chunk_index)s, %(text)s, %(embedding)s,
-                 to_tsvector(%(tscfg)s::regconfig, %(text)s),
+                 to_tsvector('simple', %(text)s),
                  %(tier)s, %(lang)s, %(topic)s, %(page)s, %(char_start)s, %(char_end)s)
             """,
-            payload,
+            rows,
         )
