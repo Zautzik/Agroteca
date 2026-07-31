@@ -1,7 +1,7 @@
-"""Phase 3 payoff: dense vs lexical vs hybrid on the golden set.
+"""Retriever comparison on the golden set: dense vs lexical vs hybrid vs rerank.
 
 Same dual metric as the Phase-2 baseline (answer-chunk + document), so numbers are
-directly comparable to results/baseline.md. Also prints which questions hybrid fixed.
+directly comparable to results/baseline.md. Prints what each stage fixed.
 
     uv run python eval/compare_retrievers.py --k 5
 """
@@ -15,6 +15,7 @@ from agroteca.ingest import store
 from agroteca.retrieve.dense import dense_search
 from agroteca.retrieve.hybrid import hybrid_search
 from agroteca.retrieve.lexical import lexical_search
+from agroteca.retrieve.rerank import rerank_search
 
 GOLDEN = settings.root / "eval" / "golden_set.jsonl"
 
@@ -56,6 +57,7 @@ def main(k: int):
         "dense":   lambda query, kk: dense_search(conn, query, kk),
         "lexical": lambda query, kk: lexical_search(conn, query, kk),
         "hybrid":  lambda query, kk: hybrid_search(conn, query, kk, n=60),
+        "rerank":  lambda query, kk: rerank_search(conn, query, kk),
     }
     print(f"\n=== retrieval@{k} over {n} answerable questions ===")
     print(f"{'method':8}  {'answer-chunk':16}  {'document':12}")
@@ -65,10 +67,13 @@ def main(k: int):
         results[name] = (a, d, miss)
         print(f"{name:8}  {f'{a}/{n} = {a/n:.2f}':16}  {f'{d}/{n} = {d/n:.2f}':12}")
 
-    dmiss, hmiss = set(results["dense"][2]), set(results["hybrid"][2])
-    print(f"\nhybrid FIXED (dense missed → hybrid hit): {sorted(dmiss - hmiss) or '—'}")
-    print(f"hybrid regressed (dense hit → hybrid missed): {sorted(hmiss - dmiss) or '—'}")
-    print(f"still missed by hybrid: {sorted(hmiss) or '—'}")
+    dmiss = set(results["dense"][2])
+    hmiss = set(results["hybrid"][2])
+    rmiss = set(results["rerank"][2])
+    print(f"\nhybrid FIXED over dense:    {sorted(dmiss - hmiss) or '—'}")
+    print(f"rerank FIXED over hybrid:   {sorted(hmiss - rmiss) or '—'}")
+    print(f"rerank regressed vs hybrid: {sorted(rmiss - hmiss) or '—'}")
+    print(f"still missed by rerank:     {sorted(rmiss) or '—'}")
     conn.close()
 
 

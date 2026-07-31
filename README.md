@@ -2,7 +2,7 @@
 
 **An eval-first, bilingual (ES/EN) Retrieval-Augmented Generation system over agricultural documents — built measurement-first, with a governed, provenance-aware corpus.**
 
-> Status: **Phase 1 complete** (evaluation foundation + governed corpus). Retrieval pipeline is specified and in progress. This README is honest about what is built vs. planned — see [Roadmap](#roadmap).
+> Status: **Phases 1–4 complete** — governed corpus, ingestion, hybrid retrieval, and cross-encoder reranking. **retrieval@5: 0.32 (dense) → 0.42 (hybrid) → 0.74 (reranked)**, measured on the golden set. API + deployment are next. See [Roadmap](#roadmap).
 
 ---
 
@@ -57,13 +57,13 @@ uv run eval/validate_golden.py
 | Phase | Deliverable | Ship criterion | Status |
 |---|---|---|---|
 | 1 | Golden set + governed corpus + validator | validator passes; corpus tiered & text-verified | ✅ **done** |
-| 2 | Ingestion: normalize → chunk → embed (BGE-M3) → pgvector + BM25 | corpus indexed; `retrieval@5` measured on the golden set | 📝 **spec'd** ([docs/phase2_ingestion_spec.md](docs/phase2_ingestion_spec.md)) |
-| 3 | Hybrid retrieval (dense + lexical) fused with Reciprocal Rank Fusion | an exact-term query that dense-only misses now retrieves | ⏳ planned |
-| 4 | Reranking + grounded, **cited**, abstaining generation | answers are cited; no-answer questions correctly abstain | ⏳ planned |
-| 5 | FastAPI streaming endpoint + cache + latency budget | measured p95 on golden-set queries | ⏳ planned |
+| 2 | Ingestion: normalize → chunk → embed → pgvector + FTS | corpus indexed (10,330 chunks); `retrieval@5` baseline measured | ✅ **done** → 0.32 |
+| 3 | Hybrid retrieval (dense + lexical) fused with RRF | the number moves vs the dense baseline | ✅ **done** → 0.42 |
+| 4 | Cross-encoder reranking (precision stage) | rerank@5 beats hybrid on the golden set | ✅ **done** → 0.74 |
+| 5 | Grounded, **cited**, abstaining generation + FastAPI streaming | answers are cited; no-answer questions abstain; measured p95 | ⏳ planned |
 | 6 | Frontend + deploy + write-up | a stranger can open a URL and get a cited answer | ⏳ planned |
 
-**Target metrics** (goals, not yet measured): retrieval@5 tracked baseline → final across the build; sub-second retrieval p95. These will be reported with real before/after numbers as the pipeline lands — that's the reason the eval was built first.
+**Measured** (answerable golden set, k=5): retrieval@5 **0.32 → 0.42 → 0.74** (dense → hybrid → reranked); document@5 **0.63 → 0.89**. Six questions fixed by reranking, zero regressions. Embeddings are MiniLM-384 on CPU; e5-large / BGE-M3 is a documented upgrade. Latency p95 lands with Phase 5.
 
 ---
 

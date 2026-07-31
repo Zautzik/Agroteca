@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     embed_dim: int = 384
     batch_size: int = 64
 
+    # --- reranker (cross-encoder, Phase 4) ---
+    # multilingual cross-encoder; only runs on the small hybrid candidate pool.
+    rerank_model: str = "jinaai/jina-reranker-v2-base-multilingual"
+    rerank_candidates: int = 20   # how many hybrid results to re-score
+
     # --- chunking ---
     chunk_tokens: int = 512
     chunk_overlap: int = 64
