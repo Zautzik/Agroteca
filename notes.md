@@ -90,3 +90,71 @@ What's next is the part everyone else rushes to and I deliberately saved for las
 And *because* I built the eval first, every one of those steps arrives with a before-and-after I can actually prove. That was the entire point. When someone asks "how do you know your reranker helped?", I won't say "it felt better." I'll show the delta.
 
 Part 2 will have graphs. This part had a zero-byte chemistry file, and honestly, I'm still a little proud of catching it.
+
+---
+
+# The Student Sits the Exam
+
+### Notes from building an eval-first agricultural RAG — Part 2: the graphs I promised
+
+In Part 1 I wrote the final exam before I built the student, then spent the whole post refusing to build anything — a strange way to make progress, and a great way to make senior engineers nod. This is the part where the student shows up, sits down, and gets a grade. Three times. Each higher than the last, because I could finally *measure*.
+
+Here's the whole arc in one line, and then I'll earn it:
+
+> **retrieval@5:  0.32  →  0.42  →  0.74**
+
+## The humbling first number
+
+The first real system was the boring one: embed every chunk, embed the question, return the nearest neighbours by cosine similarity. Pure semantic search. It scored **0.32** — meaning the exact answer chunk landed in the top 5 about a third of the time.
+
+That's not a good number. It's a *baseline*, and the point of a baseline isn't to impress anyone — it's to give you something to beat, honestly, with the next idea. You cannot improve what you refuse to measure, and you cannot measure improvement without a starting line you're a little embarrassed by.
+
+## Hybrid, and the number that went the wrong way
+
+Semantic search has a specific, predictable blind spot: exact strings. Ask it for the alfalfa variety `WL-323` and it will warmly return "alfalfa varieties, in general." So I added a second retriever — Postgres full-text search, which is *only* good at exact tokens — and fused the two rankings with Reciprocal Rank Fusion. (RRF fuses by *rank*, not score, because a cosine distance and a full-text rank aren't the same currency; adding them is a category error.)
+
+Hybrid scored **0.42**. Up from 0.32. Ship it, right?
+
+Except here's the twist I could have quietly buried: lexical search *by itself* scored **0.47** — higher than my clever hybrid. My fusion had *diluted* a strong retriever with a weaker one's noise, an RRF quirk that shows up at small k. I know this only because the eval let me *see* it. A junior reports 0.42 and takes a bow. The ruler told me hybrid wasn't the finish line — which turned out to be the most useful thing it ever said.
+
+(There was a bug on the way, too: full-text search kept returning nothing. Postgres's `websearch_to_tsquery` ANDs every term by default, so a whole-sentence question demanded one chunk contain *every* word — and none did. Lexical scored a perfect 0.00 until I rebuilt the query as an OR of the content words. Read the tool's defaults before you trust its output.)
+
+## The reranker, and the jump that made it worth it
+
+The finish line was a **cross-encoder**. A normal embedding model judges the question and a chunk *separately* and compares the results — fast, but a little shallow. A cross-encoder reads the question and the chunk *together*, as one input, and scores how well they actually answer each other. It's far sharper and far slower — so you never run it on the whole corpus. You run it on the top 20 the cheap retrievers already found, and let it re-sort them.
+
+That step took retrieval@5 from 0.42 to **0.74**. It fixed six questions the earlier stages had missed, and broke *zero*. Pure gain.
+
+And it handed me the cleanest lesson in measurement discipline of the whole build. When I eyeballed a single reranked query, the top result looked like *garbage* — a weeds table, a title page, a bibliography. If I'd trusted my eyes I'd have declared the reranker broken and ripped it out. But the aggregate over all 22 questions said 0.74. **Trust the ruler, not the vibe.** One query is an anecdote; the golden set is evidence.
+
+## The model I didn't use
+
+A quick word on the embedding model, because it's a decision I'm proud of *not* getting wrong. I'd planned to use BGE-M3 — the fashionable multilingual choice, and it's genuinely good. Then I timed it on my actual hardware: about 1.2 chunks per second on CPU, which for this corpus is roughly "come back tomorrow." I tried e5-large (still slow), then a MiniLM model at 384 dimensions — and it was the sweet spot: fast enough to iterate, good enough to score well.
+
+The heavier models are still in my README, labeled honestly as an upgrade path. But the working system runs on the one I picked with a *stopwatch*, not a hype cycle.
+
+## Teaching it to say "I don't know"
+
+Then, generation — the part everyone thinks is the whole project. Three rules, in order: **GROUND** every sentence in the retrieved context, **CITE** the source after each claim, and **ABSTAIN** — reply with one fixed phrase — when the context simply doesn't contain the answer.
+
+Two decisions in there are more senior than they look. First, the rules live in the model's *system* instructions, kept separate from the retrieved text — because a retrieved chunk is untrusted input that could itself contain "ignore your previous instructions," and I don't want a poisoned document to be able to switch off my abstention rule. Second, I run the model **locally**, on purpose: it's free, it works with no internet (this is also meant to be a real tool on a real farm someday), and the copyrighted chunks in my local-only tier never leave my machine.
+
+Which model? I measured that too. A 7-billion-parameter model and a 3-billion one abstained *identically* on the unanswerable questions — the 3B just did it three times faster. Because RAG generation isn't a reasoning contest; retrieval already did the thinking. The generator's whole job is to read what it's given, obey the rules, and cite. That's an obedience task, and obedience doesn't need a genius.
+
+## The best bug I found this whole project
+
+Here's the one I'll be telling in interviews.
+
+The generation eval flagged a hallucination. I'd asked for the recommended stocking density of tilapia in an aquaponic system — a question I had deliberately labeled *unanswerable*, a trap to prove the model would abstain. Instead it confidently produced a number. Caught red-handed inventing facts. Open and shut.
+
+Except the rule now is: **inspect the failure.** So I looked at the chunks it had retrieved — and the number wasn't invented at all. It had come, nearly verbatim, from an FAO manual on small-scale aquaponics that, it turns out, *does* give stocking densities. The model had grounded correctly and cited faithfully. It was right. **My answer key was wrong.**
+
+I had been one keystroke from "fixing" it — adding a confidence filter to suppress that answer. That fix would have trained my system to *hide a correct, cited answer* in order to satisfy a mislabeled question. I'd have degraded the thing to make a broken metric turn green.
+
+So I fixed the label instead. And I walked away with the deepest lesson in the project, the one that separates people who run evals from people who understand them: **a metric is only as trustworthy as its labels.** A red number can be a lie your ground truth is telling you. The only defense is to open up every failure and look — every single time.
+
+## What's next (and what isn't)
+
+Honest status, because honesty is still the whole brand: the brain is built and graded. What's left is the mouth and the face — a small API that *streams* a cited answer token by token, a real p95 latency number (spoiler: CPU inference is the honest tax you pay for "free and local"), and a front end where a stranger types a question and watches an answer assemble itself, citations and all.
+
+Part 1 had a zero-byte chemistry file. Part 2 had a 3-billion-parameter model that knew when to shut up, and an answer key that got schooled by its own student. Part 3 opens the door and lets people in.
