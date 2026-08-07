@@ -5,12 +5,15 @@ description = "Eval-first bilingual agricultural RAG"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
     "fastembed>=0.8.0",
+    "httpx>=0.28.1",
     "ollama>=0.6.2",
     "pgvector>=0.5.0",
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
     "pymupdf>=1.28.0",
+    "uvicorn>=0.52.1",
 ]
 
 [build-system]

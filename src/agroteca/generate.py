@@ -44,6 +44,21 @@ def answer(conn, question: str, k: int = 5) -> str:
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"  # 3. build the user message
     return ask_ollama(SYSTEM_PROMPT, user)                 # 4. ground + cite (or abstain)
 
+def answer_stream(conn, question: str, k: int = 5):
+    """Like answer(), but YIELDS the reply token-by-token as the model generates it."""
+    rows = rerank_search(conn, question, k=k)              # retrieval (the pre-token wait)
+    context = format_context(rows)
+    user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
+    stream = ollama.chat(
+        model="qwen2.5:3b",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        stream=True,                                       # <- Ollama now yields chunks, not one blob
+    )
+    for chunk in stream:
+        yield chunk["message"]["content"]                  # <- hand over each token as it arrives
 
 if __name__ == "__main__":
     import sys
