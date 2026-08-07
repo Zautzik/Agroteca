@@ -2,9 +2,9 @@
 
 **An eval-first, bilingual (ES/EN) Retrieval-Augmented Generation system over agricultural documents — built measurement-first, with a governed, provenance-aware corpus.**
 
-> **Status: Phases 1–5 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation.
+> **Status: Phases 1–7 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** with a retrieval-transparency drawer. Only public deployment remains.
 >
-> **The number that matters:** retrieval@5 **0.32 (dense) → 0.42 (hybrid) → 0.74 (reranked)** — every step measured against a golden set built *before* the retriever existed. Serving (API + streaming) and deployment are the remaining roadmap.
+> **The number that matters:** retrieval@5 **0.32 (dense) → 0.42 (hybrid) → 0.74 (reranked)** — every step measured against a golden set built *before* the retriever existed.
 
 ---
 
@@ -89,6 +89,28 @@ Reranking fixed **six** questions the earlier stages missed, with **zero regress
 
 ---
 
+## The web app
+
+A local model on CPU is slow (~minutes per answer), so the front end is built to make a slow, honest system *feel* alive and trustworthy:
+
+- **Watch it grow** — a seed→sprout→flower→fruit reel plays during retrieval, then the answer **streams in token by token**. The wait reads as progress, never a freeze.
+- **Radical transparency** — every answer carries a one-click **"Sources & retrieval"** drawer: the exact chunks it grounded on, each with a governance-tier badge, a cross-encoder relevance bar, and a snippet — plus a retrieval-vs-generation latency breakdown. *The answer isn't magic; here's the evidence.*
+- **Honest by design** — when the corpus can't answer, the card becomes a distinct **empty-basket** state, never a fabricated guess.
+- **Bilingual** — a leaf ES/EN toggle localizes the whole UI (and the example questions); the model already answers in the question's language.
+- **Product touches** — light/dark themes, shareable `?q=` links, session history, keyboard shortcuts, a live health dot, a corpus-stats ribbon, live tokens/sec, a real Stop button, copy/export, and 👍/👎 feedback logged server-side.
+
+The default view stays a calm search box — all of that power reveals only on demand.
+
+```bash
+# launch the web app (needs Postgres + pgvector and a local Ollama model)
+uv run uvicorn agroteca.api:app --reload
+# then open http://127.0.0.1:8000  ·  auto-generated API docs at /docs
+```
+
+> _Screenshots / a short demo GIF go here — the fastest way to convey the UI to someone skimming the repo._
+
+---
+
 ## Roadmap
 
 | Phase | Deliverable | Ship criterion | Status |
@@ -98,8 +120,9 @@ Reranking fixed **six** questions the earlier stages missed, with **zero regress
 | 3 | Hybrid retrieval (dense + lexical) fused with RRF | the number moves vs the dense baseline | ✅ **done** → 0.42 |
 | 4 | Cross-encoder reranking (precision stage) | rerank@5 beats hybrid on the golden set | ✅ **done** → 0.74 |
 | 5 | Grounded, **cited**, **abstaining** generation (local LLM) | answers are cited; no-answer questions abstain | ✅ **done** |
-| 6 | Serving: FastAPI + token streaming + measured p95 | a request streams a cited answer end-to-end | ⏳ planned |
-| 7 | Frontend + deploy + write-up | a stranger opens a URL and gets a cited answer | ⏳ planned |
+| 6 | Serving: FastAPI + token streaming (NDJSON evidence stream) | a request streams a cited answer end-to-end | ✅ **done** |
+| 7 | Web app: bilingual streaming UI + retrieval-transparency drawer | grounded/cited answer *or* honest abstention, evidence one click away | ✅ **done** |
+| 8 | Public deployment + write-up | a stranger opens a URL and gets a cited answer | ⏳ planned |
 
 ---
 
@@ -131,7 +154,10 @@ eval/
 src/agroteca/
   ingest/                 # extract · normalize · chunk · embed · store
   retrieve/               # dense · lexical · fusion (RRF) · hybrid · rerank
-  generate.py             # ground / cite / abstain generation over reranked chunks
+  generate.py             # ground / cite / abstain generation (+ NDJSON streaming)
+  api.py                  # FastAPI service: /ask/stream, /stats, /feedback, /health
+  static/index.html       # the self-contained bilingual streaming web app
+stream_client.py          # tiny terminal client for the streaming endpoint
 migrations/               # pgvector + full-text schema
 docs/                     # ingestion spec + teaching notes
 results/                  # measured before/after for each phase
@@ -152,6 +178,9 @@ uv run python eval/compare_retrievers.py --k 5
 
 # 3. a grounded, cited answer from the real corpus  (needs Postgres + Ollama)
 uv run python src/agroteca/generate.py
+
+# 4. the full web app  (needs Postgres + pgvector + Ollama)
+uv run uvicorn agroteca.api:app --reload   # then open http://127.0.0.1:8000
 ```
 
 ---

@@ -158,3 +158,55 @@ So I fixed the label instead. And I walked away with the deepest lesson in the p
 Honest status, because honesty is still the whole brand: the brain is built and graded. What's left is the mouth and the face — a small API that *streams* a cited answer token by token, a real p95 latency number (spoiler: CPU inference is the honest tax you pay for "free and local"), and a front end where a stranger types a question and watches an answer assemble itself, citations and all.
 
 Part 1 had a zero-byte chemistry file. Part 2 had a 3-billion-parameter model that knew when to shut up, and an answer key that got schooled by its own student. Part 3 opens the door and lets people in.
+
+---
+
+# The Door
+
+### Notes from building an eval-first agricultural RAG — Part 3: turning a brain into a thing people can use
+
+A RAG system is only half an engineering project. The other half is that the thing I'd built answered questions in about **seven minutes.** On a laptop CPU, a local language model doesn't sprint — it ruminates. Retrieval is quick; generation is a slow, deliberate chew.
+
+Here's the uncomfortable truth I had to design around: **seven minutes of a blank screen is indistinguishable from "broken."** The user can't tell thinking from crashed. They reload. They leave. The most correct, best-grounded answer on earth is worthless if nobody waits for it.
+
+So Part 3 isn't about making it faster. It's about making a slow, honest system *feel* alive and trustworthy — which turns out to be the more interesting problem.
+
+## Streaming, or: latency is a feeling
+
+The first move was to make the answer **stream** — appear word by word as the model generates it, instead of landing all at once at the end. The wall-clock time is identical. The *experience* is a different universe.
+
+I know this because I built the slow version first, on purpose, and sat through the dead spinner. Then I built the streaming version and watched the same answer type itself out. Same seven minutes. One felt broken; the other felt like watching someone think.
+
+**Streaming doesn't reduce latency. It reduces *anxiety*.** That distinction — perceived versus actual — is the whole game in slow-but-honest systems, and it's the sentence I'll offer when an interviewer asks how a seven-minute app is acceptable. (There's also a seedling that grows while you wait — sprout, flower, fruit, drop, reseed, forever, until the answer arrives. A small thing that completely changes how the wait feels.)
+
+## The drawer, or: show your work
+
+The second move is the one I'm proudest of, because it's the opposite of what most AI demos do. Most hide the machinery and ask you to trust a confident sentence. I did the reverse: **every answer comes with a receipt.**
+
+Click "Sources & retrieval" and it unfolds — the exact chunks the answer was built from, each tagged with its governance tier, a bar showing the cross-encoder's relevance score, a snippet of the real retrieved text, and a breakdown of where the seven minutes actually went (retrieval versus generation).
+
+The answer isn't magic. Here's the evidence. Check my work.
+
+That's not a gimmick — it's the whole thesis of the project made visible. A grounded RAG that *shows* its grounding is a fundamentally more trustworthy object than one that merely asserts.
+
+## The empty basket
+
+And when the corpus genuinely can't answer — the tilapia question's honest cousins — the system doesn't fabricate. The card becomes a small, deliberate empty basket: *"It's not in the available sources, and the system would rather say so than invent it."* I spent much of the project making the model willing to say "I don't know." It felt right to make "I don't know" *look* like a feature, because it is one.
+
+## Thirty features, one calm box
+
+Somewhere this became a real product — dark mode, two languages, shareable links, session history, keyboard shortcuts, a live health dot, a corpus-scale ribbon, a tokens-per-second readout, a Stop button, copy and export, thumbs feedback that logs to the server.
+
+Thirty features is exactly how a beautiful app becomes an ugly one. The rule I held: **the empty screen stays a calm search box.** Everything else lives one gesture away — behind a drawer, a hover, a keystroke, a toggle. Calm by default, powerful on demand. An employer should see elegance first and *discover* the depth, which is far more convincing than being handed a dashboard.
+
+## The honest footnote on "deploy"
+
+Could a stranger open a URL right now? Almost. The one thing between here and there is that the app carries a local model, a database, and a seven-minute CPU chew — a delight to run on my own machine and an expense to run on a public server that strangers hit. A live URL wants a GPU, a smaller model, or patience the internet doesn't have. That's a deployment decision with a dollar sign on it, not a code problem — and I'd rather name it honestly than pretend the latency isn't real.
+
+## The whole arc
+
+Three posts ago I wrote a final exam before I built a student. Two posts ago the student sat the exam, its scores climbing one measured step at a time — and then caught its own examiner in a mistake. This post, the student opened a practice, hung a sign out in two languages, and started showing every visitor exactly how it reached each answer — or admitting, plainly, when it couldn't.
+
+The interesting part was never the line count. It was the judgment: measure before you build, distrust your own metrics, show your work, and know when to say "I don't know." A system that does those four things is trustworthy. A person who does them is worth hiring.
+
+That was always the point.
