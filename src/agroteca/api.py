@@ -1,12 +1,20 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse   # add near the top
-from agroteca.generate import answer, answer_stream   # add answer_stream to this import
+from agroteca.generate import answer, answer_stream  
+from pathlib import Path
+from fastapi.responses import FileResponse # add answer_stream to this import
 
 from agroteca.generate import answer
 from agroteca.ingest import store
 
 app = FastAPI(title="Agroteca")
+
+STATIC = Path(__file__).parent / "static"
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC / "index.html")
 
 
 class Question(BaseModel):      # the shape of the POST body: {"question": "..."}
