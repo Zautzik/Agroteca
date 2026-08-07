@@ -117,6 +117,14 @@
   @keyframes sproutPop { 0% { transform: scale(.55) translateY(6px); opacity: .5; } 38% { transform: scale(1.2) translateY(-2px); } 100% { transform: scale(1) translateY(0); opacity: 1; } }
   .loading-text { color: var(--muted); font-style: italic; font-size: 14.5px; }
 
+  /* live session UX (Wave D) */
+  .streamstats { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+  .stopbtn { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; }
+  .stopbtn:hover { color: var(--accent); border-color: var(--accent); }
+  .streamstats .stopbtn { margin-left: auto; }
+  .loading .stopbtn { margin-top: 2px; }
+  .stopped { color: var(--muted); font-style: italic; font-size: 13.5px; margin-top: 10px; }
+
   footer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 34px; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -169,6 +177,7 @@
       abstainTitle: 'Fuera del corpus',
       abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
       sourcesLabel: 'Fuentes recuperadas', lowConfidence: 'Coincidencia débil — lee con cautela.',
+      stopLabel: 'Detener', stopped: 'Detenido',
       chips: [
         "¿Cuánta agua se puede captar por cada milímetro de lluvia sobre un metro cuadrado de techo?",
         "¿En qué año fue introducida Rodolia cardinalis a California?",
@@ -187,6 +196,7 @@
       abstainTitle: 'Outside the corpus',
       abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
       sourcesLabel: 'Retrieved sources', lowConfidence: 'Weak match — read with care.',
+      stopLabel: 'Stop', stopped: 'Stopped',
       chips: [
         "How much water can be harvested per millimetre of rain on a square metre of roof?",
         "In what year was Rodolia cardinalis introduced to California?",
@@ -305,7 +315,7 @@
 
   /* ---------- the life-cycle reel ---------- */
   const SPROUT = ['🌰', '🌱', '🌿', '🌸', '🍎'];
-  let sproutTimer = null;
+  let sproutTimer = null, abortCtrl = null, elapsedTimer = null;
   function stopSprout() { if (sproutTimer) { clearInterval(sproutTimer); sproutTimer = null; } }
 
   async function run() {
@@ -313,21 +323,30 @@
     if (!question) return;
     lastQuestion = question;
     ask.disabled = true;
+    abortCtrl = new AbortController();
+    const startT = Date.now();
+
     answer.className = 'answer show';
-    answer.innerHTML = '<div class="loading"><div class="sprout" aria-hidden="true">🌰</div><div class="loading-text">' + I18N[currentLang].loading + '</div></div>';
+    answer.innerHTML = '<div class="loading"><div class="sprout" aria-hidden="true">🌰</div>'
+      + '<div class="loading-text">' + I18N[currentLang].loading + ' <span id="elapsed">0s</span></div>'
+      + '<button class="stopbtn" id="stop"></button></div>';
     answer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    { const s = document.getElementById('stop'); s.textContent = I18N[currentLang].stopLabel; s.onclick = () => abortCtrl.abort(); }
 
     const sproutEl = answer.querySelector('.sprout');
     let frame = 0; stopSprout();
     sproutTimer = setInterval(() => { frame = (frame + 1) % SPROUT.length; sproutEl.textContent = SPROUT[frame]; }, 1100);
+    clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(() => { const el = document.getElementById('elapsed'); if (el) el.textContent = ((Date.now() - startT) / 1000).toFixed(0) + 's'; }, 500);
 
+    let firstT = 0, tokCount = 0;
     try {
-      const resp = await fetch('/ask/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+      const resp = await fetch('/ask/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), signal: abortCtrl.signal });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
-      let buf = '', streamEl = null, meta = null;
+      let buf = '', streamEl = null, meta = null, statTextEl = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -343,22 +362,39 @@
           } else if (msg.type === 'token') {
             if (!streamEl) {
               stopSprout();
-              answer.innerHTML = '<div class="answer-main"><span class="answer-text" id="stream"></span><span class="cursor"></span></div>' + renderSources(meta);
+              firstT = Date.now();
+              answer.innerHTML = '<div class="streamstats" id="stats"><span id="statstext"></span><button class="stopbtn" id="stop2"></button></div>'
+                + '<div class="answer-main"><span class="answer-text" id="stream"></span><span class="cursor"></span></div>' + renderSources(meta);
               streamEl = document.getElementById('stream');
+              statTextEl = document.getElementById('statstext');
+              const s2 = document.getElementById('stop2'); s2.textContent = I18N[currentLang].stopLabel; s2.onclick = () => abortCtrl.abort();
             }
+            tokCount++;
             streamEl.insertAdjacentHTML('beforeend', '<span class="tok">' + esc(msg.text) + '</span>');
+            const secs = (Date.now() - firstT) / 1000;
+            statTextEl.textContent = '🌿 ' + tokCount + ' tok · ' + (secs > 0 ? (tokCount / secs).toFixed(1) : '0.0') + ' tok/s';
           } else if (msg.type === 'done') {
             const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
+            const st = document.getElementById('stats'); if (st) st.remove();
             if (streamEl) finalize(streamEl.textContent, meta, msg);
           }
         }
       }
     } catch (e) {
-      stopSprout();
-      answer.textContent = I18N[currentLang].error(e.message);
+      const st = document.getElementById('stats'); if (st) st.remove();
+      const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
+      if (e.name === 'AbortError') {
+        const main = answer.querySelector('.answer-main');
+        const note = '<div class="stopped">■ ' + I18N[currentLang].stopped + '</div>';
+        if (main) main.insertAdjacentHTML('beforeend', note); else answer.innerHTML = note;
+      } else {
+        answer.textContent = I18N[currentLang].error(e.message);
+      }
     } finally {
       stopSprout();
+      clearInterval(elapsedTimer);
       ask.disabled = false;
+      abortCtrl = null;
     }
   }
 
