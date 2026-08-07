@@ -10,23 +10,20 @@
     --bg: #f4eede; --card: #fffdf8; --ink: #2c2a26; --muted: #837c6c;
     --green: #3f5b2e; --green-deep: #2c401f; --accent: #c47f3f; --line: #e7ddc9;
     --field: #ffffff; --chip-bg: #edf1e4; --chip-border: #dde5cf; --toggle-border: #d3ddc2;
-    --shadow: 0 14px 40px rgba(52, 42, 20, 0.10);
-    --glow: rgba(63,91,46,.13);
+    --shadow: 0 14px 40px rgba(52, 42, 20, 0.10); --glow: rgba(63,91,46,.13);
   }
   :root[data-theme="dark"] {
     --bg: #161b12; --card: #1f2618; --ink: #e9e5d7; --muted: #9c9784;
     --green: #8bbb5d; --green-deep: #b0d585; --accent: #e0a95a; --line: #333c28;
     --field: #191f14; --chip-bg: rgba(139,187,93,.13); --chip-border: #3a4530; --toggle-border: #3a4530;
-    --shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
-    --glow: rgba(139,187,93,.22);
+    --shadow: 0 16px 44px rgba(0, 0, 0, 0.45); --glow: rgba(139,187,93,.22);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #161b12; --card: #1f2618; --ink: #e9e5d7; --muted: #9c9784;
       --green: #8bbb5d; --green-deep: #b0d585; --accent: #e0a95a; --line: #333c28;
       --field: #191f14; --chip-bg: rgba(139,187,93,.13); --chip-border: #3a4530; --toggle-border: #3a4530;
-      --shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
-      --glow: rgba(139,187,93,.22);
+      --shadow: 0 16px 44px rgba(0, 0, 0, 0.45); --glow: rgba(139,187,93,.22);
     }
   }
 
@@ -40,10 +37,8 @@
     transition: background-color .3s, color .3s;
   }
   .wrap { max-width: 720px; margin: 0 auto; padding: 52px 20px 90px; }
-
   :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 8px; }
 
-  /* top-right controls: theme + language */
   .controls { position: fixed; top: 20px; right: 20px; z-index: 20; display: flex; align-items: center; gap: 10px; }
   .iconbtn {
     width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--toggle-border);
@@ -67,31 +62,19 @@
 
   header { text-align: center; margin-bottom: 32px; animation: rise .5s ease both; }
   .logo { font-size: 44px; line-height: 1; }
-  h1 {
-    font-family: Georgia, "Times New Roman", serif; font-weight: 600;
-    font-size: 36px; margin: 8px 0 6px; color: var(--green-deep); letter-spacing: -0.5px;
-  }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 600; font-size: 36px; margin: 8px 0 6px; color: var(--green-deep); letter-spacing: -0.5px; }
   .tag { color: var(--muted); font-size: 15px; margin: 0; }
   .tag em { color: var(--accent); font-style: italic; }
 
-  .card {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 18px; box-shadow: var(--shadow); padding: 22px;
-    animation: rise .5s ease .06s both;
-  }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 22px; animation: rise .5s ease .06s both; }
   textarea {
-    width: 100%; border: 1px solid var(--line); border-radius: 13px;
-    padding: 14px 16px; font-size: 16px; font-family: inherit; color: var(--ink);
-    resize: none; overflow: hidden; min-height: 74px; background: var(--field); outline: none;
-    transition: border-color .15s, box-shadow .15s;
+    width: 100%; border: 1px solid var(--line); border-radius: 13px; padding: 14px 16px;
+    font-size: 16px; font-family: inherit; color: var(--ink); resize: none; overflow: hidden;
+    min-height: 74px; background: var(--field); outline: none; transition: border-color .15s, box-shadow .15s;
   }
   textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--glow); }
   .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-  button.ask {
-    background: var(--green); color: #fff; border: 0; border-radius: 12px;
-    padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer;
-    transition: background .15s, transform .05s, box-shadow .15s;
-  }
+  button.ask { background: var(--green); color: #fff; border: 0; border-radius: 12px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .15s, transform .05s, box-shadow .15s; }
   button.ask:hover { background: var(--green-deep); box-shadow: 0 6px 16px var(--glow); }
   button.ask:active { transform: translateY(1px); }
   button.ask:disabled { background: var(--muted); cursor: not-allowed; box-shadow: none; opacity: .65; }
@@ -99,24 +82,34 @@
   .counter { color: var(--muted); font-size: 12px; margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-  .chip {
-    font-size: 13px; color: var(--green-deep); background: var(--chip-bg);
-    border: 1px solid var(--chip-border); border-radius: 999px; padding: 6px 13px;
-    cursor: pointer; transition: transform .15s, background .15s, box-shadow .15s;
-  }
+  .chip { font-size: 13px; color: var(--green-deep); background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 999px; padding: 6px 13px; cursor: pointer; transition: transform .15s, background .15s, box-shadow .15s; }
   .chip:hover { transform: translateY(-2px); box-shadow: 0 4px 12px var(--glow); }
 
-  .answer {
-    margin-top: 22px; background: var(--card); border: 1px solid var(--line);
-    border-left: 4px solid var(--green); border-radius: 13px; padding: 20px 22px;
-    font-size: 16.5px; white-space: pre-wrap; word-wrap: break-word; display: none;
-  }
+  .answer { margin-top: 22px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--green); border-radius: 13px; padding: 20px 22px; font-size: 16.5px; display: none; }
   .answer.show { display: block; animation: rise .35s ease both; }
-  .cursor { display: inline-block; width: 8px; height: 1.05em; vertical-align: text-bottom;
-            background: var(--accent); margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  .answer-text { white-space: pre-wrap; word-wrap: break-word; }
+  .cursor { display: inline-block; width: 8px; height: 1.05em; vertical-align: text-bottom; background: var(--accent); margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  .tok { animation: fadeIn .5s ease both; }
   @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
+  /* answer action bar (Wave B) */
+  .actionbar { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .seal { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--green-deep); background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 999px; padding: 5px 11px; }
+  .modelbadge { font-size: 11.5px; color: var(--muted); letter-spacing: .3px; }
+  .spacer { margin-left: auto; }
+  .act { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 9px; padding: 6px 11px; font-size: 13px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; font-family: inherit; }
+  .act:hover { color: var(--green-deep); border-color: var(--green); }
+  .act.on { color: var(--green); border-color: var(--green); background: var(--chip-bg); }
+
+  /* abstention "empty basket" state */
+  .empty { text-align: center; padding: 12px 0 6px; }
+  .empty-icon { font-size: 46px; }
+  .empty-title { font-weight: 700; color: var(--green-deep); margin-top: 8px; }
+  .empty-text { color: var(--muted); font-size: 14px; margin-top: 4px; max-width: 44ch; margin-left: auto; margin-right: auto; }
+
+  /* the life-cycle reel */
   .loading { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 0 8px; }
   .sprout { font-size: 48px; line-height: 1; display: inline-block; animation: sproutPop 1.1s ease-in-out infinite; }
   @keyframes sproutPop { 0% { transform: scale(.55) translateY(6px); opacity: .5; } 38% { transform: scale(1.2) translateY(-2px); } 100% { transform: scale(1) translateY(0); opacity: 1; } }
@@ -170,6 +163,9 @@
       loading: 'Consultando el corpus…',
       footer: 'Local · sin nube · fundado en un corpus curado y gobernado por licencia.',
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
+      grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar',
+      abstainTitle: 'Fuera del corpus',
+      abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
       chips: [
         "¿Cuánta agua se puede captar por cada milímetro de lluvia sobre un metro cuadrado de techo?",
         "¿En qué año fue introducida Rodolia cardinalis a California?",
@@ -184,6 +180,9 @@
       loading: 'Searching the corpus…',
       footer: 'Local · no cloud · grounded in a curated, license-governed corpus.',
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
+      grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export',
+      abstainTitle: 'Outside the corpus',
+      abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
       chips: [
         "How much water can be harvested per millimetre of rain on a square metre of roof?",
         "In what year was Rodolia cardinalis introduced to California?",
@@ -199,29 +198,23 @@
   const chips = document.getElementById('chips');
   const counter = document.getElementById('counter');
   const themeBtn = document.getElementById('themeBtn');
+  const ABSTAIN = 'no encuentro la respuesta en el contexto disponible';
+  let lastQuestion = '';
 
-  /* ---------- theme (light / dark / system) ---------- */
+  /* ---------- theme ---------- */
   const THEME_KEY = 'agroteca-theme';
   const systemDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
-  function currentIsDark() {
-    const t = document.documentElement.getAttribute('data-theme');
-    return t === 'dark' || (!t && systemDark());
-  }
+  function currentIsDark() { const t = document.documentElement.getAttribute('data-theme'); return t === 'dark' || (!t && systemDark()); }
   function applyTheme(theme) {
     if (theme) document.documentElement.setAttribute('data-theme', theme);
     else document.documentElement.removeAttribute('data-theme');
-    themeBtn.textContent = currentIsDark() ? '☀' : '☾';   // shows the theme you'd switch TO
+    themeBtn.textContent = currentIsDark() ? '☀' : '☾';
   }
-  applyTheme(localStorage.getItem(THEME_KEY));            // null -> follow system
-  themeBtn.onclick = () => {
-    const next = currentIsDark() ? 'light' : 'dark';
-    localStorage.setItem(THEME_KEY, next);
-    applyTheme(next);
-  };
+  applyTheme(localStorage.getItem(THEME_KEY));
+  themeBtn.onclick = () => { const next = currentIsDark() ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, next); applyTheme(next); };
 
   /* ---------- language / i18n ---------- */
   let currentLang = (navigator.language || 'es').toLowerCase().startsWith('es') ? 'es' : 'en';
-
   function buildChips(list) {
     chips.innerHTML = '';
     list.forEach(text => {
@@ -235,7 +228,6 @@
       chips.appendChild(c);
     });
   }
-
   function setLang(lang) {
     const t = I18N[lang];
     currentLang = lang;
@@ -246,31 +238,65 @@
     document.getElementById('footer').textContent = t.footer;
     buildChips(t.chips);
     document.querySelectorAll('.langtoggle button').forEach(b => {
-      const on = b.dataset.lang === lang;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-pressed', on);
+      const on = b.dataset.lang === lang; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on);
     });
-    phIdx = 0; q.setAttribute('placeholder', t.chips[0]);   // reset rotating placeholder
+    phIdx = 0; q.setAttribute('placeholder', t.chips[0]);
   }
   document.querySelectorAll('.langtoggle button').forEach(b => b.onclick = () => setLang(b.dataset.lang));
 
-  /* ---------- textarea: auto-resize + counter ---------- */
-  function onInput() {
-    q.style.height = 'auto';
-    q.style.height = Math.min(q.scrollHeight, 220) + 'px';
-    counter.textContent = q.value.length ? q.value.length : '';
-  }
+  /* ---------- textarea auto-resize + counter ---------- */
+  function onInput() { q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 220) + 'px'; counter.textContent = q.value.length ? q.value.length : ''; }
   q.addEventListener('input', onInput);
 
-  /* ---------- rotating placeholder (only while empty & unfocused) ---------- */
+  /* ---------- rotating placeholder ---------- */
   let phIdx = 0, phTimer = setInterval(() => {
     if (document.activeElement === q || q.value) return;
-    const list = I18N[currentLang].chips;
-    phIdx = (phIdx + 1) % list.length;
-    q.setAttribute('placeholder', list[phIdx]);
+    const list = I18N[currentLang].chips; phIdx = (phIdx + 1) % list.length; q.setAttribute('placeholder', list[phIdx]);
   }, 3600);
 
   setLang(currentLang);
+
+  /* ---------- answer helpers (Wave B) ---------- */
+  function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+  function hasCitation(t) { return /\([^)]{4,}\)/.test(t); }
+
+  function finalize(text) {
+    const t = I18N[currentLang];
+    if (text.toLowerCase().includes(ABSTAIN)) {
+      answer.innerHTML = '<div class="empty"><div class="empty-icon" aria-hidden="true">🧺</div>'
+        + '<div class="empty-title">' + t.abstainTitle + '</div>'
+        + '<div class="empty-text">' + t.abstainText + '</div></div>';
+      return;
+    }
+    const bar = document.createElement('div');
+    bar.className = 'actionbar';
+    bar.innerHTML = (hasCitation(text) ? '<span class="seal">🌿 ' + t.grounded + '</span>' : '')
+      + '<span class="modelbadge">qwen2.5:3b · local</span>'
+      + '<span class="spacer"></span>'
+      + '<button class="act" data-a="copy">📋 ' + t.copy + '</button>'
+      + '<button class="act" data-a="export">⬇ ' + t.exportLabel + '</button>'
+      + '<button class="act" data-a="up" aria-label="good">👍</button>'
+      + '<button class="act" data-a="down" aria-label="bad">👎</button>';
+    answer.appendChild(bar);
+
+    bar.querySelector('[data-a=copy]').onclick = (e) => {
+      navigator.clipboard.writeText(text);
+      const b = e.currentTarget; b.textContent = '✓ ' + t.copied;
+      setTimeout(() => { b.textContent = '📋 ' + t.copy; }, 1600);
+    };
+    bar.querySelector('[data-a=export]').onclick = () => {
+      const md = '# ' + lastQuestion + '\n\n' + text + '\n';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      a.download = 'agroteca-answer.md'; a.click(); URL.revokeObjectURL(a.href);
+    };
+    const up = bar.querySelector('[data-a=up]'), down = bar.querySelector('[data-a=down]');
+    function vote(v) {
+      up.classList.toggle('on', v === 'up'); down.classList.toggle('on', v === 'down');
+      try { localStorage.setItem('agroteca-fb-' + btoa(unescape(encodeURIComponent(lastQuestion))).slice(0, 28), v); } catch (_) {}
+    }
+    up.onclick = () => vote('up'); down.onclick = () => vote('down');
+  }
 
   /* ---------- the life-cycle reel ---------- */
   const SPROUT = ['🌰', '🌱', '🌿', '🌸', '🍎'];
@@ -280,6 +306,7 @@
   async function run() {
     const question = q.value.trim();
     if (!question) return;
+    lastQuestion = question;
     ask.disabled = true;
     answer.className = 'answer show';
     answer.innerHTML = '<div class="loading"><div class="sprout" aria-hidden="true">🌰</div><div class="loading-text">'
@@ -293,8 +320,7 @@
 
     try {
       const resp = await fetch('/ask/stream', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question })
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
@@ -307,13 +333,14 @@
         const chunk = decoder.decode(value, { stream: true });
         if (!streamEl) {
           stopSprout();
-          answer.innerHTML = '<span id="stream"></span><span class="cursor"></span>';
+          answer.innerHTML = '<span class="answer-text" id="stream"></span><span class="cursor"></span>';
           streamEl = document.getElementById('stream');
         }
-        streamEl.textContent += chunk;
+        streamEl.insertAdjacentHTML('beforeend', '<span class="tok">' + esc(chunk) + '</span>');
       }
       const cur = answer.querySelector('.cursor');
       if (cur) cur.remove();
+      if (streamEl) finalize(streamEl.textContent);
     } catch (e) {
       stopSprout();
       answer.textContent = I18N[currentLang].error(e.message);
@@ -324,9 +351,7 @@
   }
 
   ask.onclick = run;
-  q.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
-  });
+  q.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } });
 </script>
 </body>
 </html>
