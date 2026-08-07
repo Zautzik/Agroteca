@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#3f5b2e">
 <title>Agroteca — asistente agronómico</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🌱%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>
   :root {
     --bg: #f4eede; --card: #fffdf8; --ink: #2c2a26; --muted: #837c6c;
@@ -38,7 +40,7 @@
   :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 8px; }
 
   .controls { position: fixed; top: 20px; right: 20px; z-index: 20; display: flex; align-items: center; gap: 10px; }
-  .iconbtn { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--toggle-border); background: var(--card); color: var(--ink); font-size: 20px; cursor: pointer; box-shadow: var(--shadow); transition: transform .15s, border-color .15s; }
+  .iconbtn { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--toggle-border); background: var(--card); color: var(--ink); font-size: 19px; cursor: pointer; box-shadow: var(--shadow); transition: transform .15s, border-color .15s; }
   .iconbtn:hover { transform: translateY(-1px) rotate(-8deg); border-color: var(--green); }
   .langtoggle { display: inline-flex; align-items: center; gap: 2px; background: var(--card); border: 2px solid var(--toggle-border); border-radius: 999px; padding: 6px; box-shadow: var(--shadow); }
   .langtoggle .leaf { font-size: 20px; padding: 0 4px 0 9px; }
@@ -60,6 +62,8 @@
   button.ask:hover { background: var(--green-deep); box-shadow: 0 6px 16px var(--glow); }
   button.ask:active { transform: translateY(1px); }
   button.ask:disabled { background: var(--muted); cursor: not-allowed; box-shadow: none; opacity: .65; }
+  .surprise { background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 12px; padding: 11px 13px; font-size: 17px; cursor: pointer; transition: transform .2s, border-color .15s; }
+  .surprise:hover { transform: rotate(18deg); border-color: var(--green); }
   .hint { color: var(--muted); font-size: 13px; }
   .counter { color: var(--muted); font-size: 12px; margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
 
@@ -89,7 +93,6 @@
   .empty-title { font-weight: 700; color: var(--green-deep); margin-top: 8px; }
   .empty-text { color: var(--muted); font-size: 14px; margin-top: 4px; max-width: 44ch; margin-left: auto; margin-right: auto; }
 
-  /* sources & retrieval drawer (Wave C) */
   .sources { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
   .sources > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; user-select: none; }
   .sources > summary::-webkit-details-marker { display: none; }
@@ -116,8 +119,6 @@
   .sprout { font-size: 48px; line-height: 1; display: inline-block; animation: sproutPop 1.1s ease-in-out infinite; }
   @keyframes sproutPop { 0% { transform: scale(.55) translateY(6px); opacity: .5; } 38% { transform: scale(1.2) translateY(-2px); } 100% { transform: scale(1) translateY(0); opacity: 1; } }
   .loading-text { color: var(--muted); font-style: italic; font-size: 14.5px; }
-
-  /* live session UX (Wave D) */
   .streamstats { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; font-variant-numeric: tabular-nums; }
   .stopbtn { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; }
   .stopbtn:hover { color: var(--accent); border-color: var(--accent); }
@@ -126,14 +127,35 @@
   .stopped { color: var(--muted); font-style: italic; font-size: 13.5px; margin-top: 10px; }
 
   footer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 34px; }
+  .statusstrip { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: #5a9a3a; } .dot.down { background: #c0563e; }
 
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
-  }
+  /* history panel + help modal (Wave E) */
+  .panel { position: fixed; top: 0; right: 0; height: 100%; width: 330px; max-width: 86vw; background: var(--card); border-left: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .25s ease; z-index: 40; padding: 22px 20px; overflow-y: auto; }
+  .panel.open { transform: translateX(0); }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .panel-head span { font-weight: 700; color: var(--green-deep); font-size: 16px; }
+  .panel-x { background: transparent; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; }
+  .hist-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); padding: 11px 2px; font-size: 13.5px; cursor: pointer; font-family: inherit; }
+  .hist-item:hover { color: var(--green-deep); }
+  .hist-empty { color: var(--muted); font-style: italic; font-size: 13px; }
+  .scrim { position: fixed; inset: 0; background: rgba(20,15,5,.35); opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 30; }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20,15,5,.4); z-index: 50; }
+  .modal.open { display: flex; }
+  .modal-box { background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 22px; width: 340px; max-width: 90vw; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .modal-head span { font-weight: 700; color: var(--green-deep); }
+  .kbd-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; font-size: 13.5px; color: var(--muted); }
+  kbd { background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 6px; padding: 2px 8px; font-family: inherit; font-size: 12px; color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
 </style>
 </head>
 <body>
   <div class="controls">
+    <button class="iconbtn" id="histBtn" aria-label="Historial / History" title="Historial">📜</button>
     <button class="iconbtn" id="themeBtn" aria-label="Cambiar tema / Toggle theme" title="Tema">☾</button>
     <div class="langtoggle" id="langtoggle" role="group" aria-label="Idioma / Language">
       <span class="leaf" aria-hidden="true">🌿</span>
@@ -153,6 +175,7 @@
       <textarea id="q" rows="1" aria-label="Pregunta / Question"></textarea>
       <div class="row">
         <button class="ask" id="ask"></button>
+        <button class="surprise" id="surprise" aria-label="Sorpréndeme / Surprise me" title="🎲">🎲</button>
         <span class="hint" id="hint"></span>
         <span class="counter" id="counter" aria-hidden="true"></span>
       </div>
@@ -161,7 +184,22 @@
 
     <div class="answer" id="answer" aria-live="polite" role="status"></div>
 
-    <footer id="footer"></footer>
+    <footer>
+      <div id="footer"></div>
+      <div class="statusstrip"><span class="dot" id="healthdot"></span><span id="statsRibbon"></span></div>
+    </footer>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="panel" id="histPanel" aria-hidden="true">
+    <div class="panel-head"><span id="histTitle"></span><button class="panel-x" id="histClose" aria-label="close">✕</button></div>
+    <div id="histList"></div>
+  </aside>
+  <div class="modal" id="help" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-head"><span id="helpTitle"></span><button class="panel-x" id="helpClose" aria-label="close">✕</button></div>
+      <div id="kbds"></div>
+    </div>
   </div>
 
 <script>
@@ -169,15 +207,17 @@
     es: {
       tagline: 'Respuestas agronómicas <em>con cita</em> — o un honesto "no lo sé".',
       ask: 'Preguntar',
-      hint: 'Ctrl+Enter para enviar · la 1ª respuesta tarda ~1–2 min (modelo local en CPU)',
+      hint: 'Ctrl+Enter enviar · / enfocar · ? atajos · ~1–2 min (CPU local)',
       loading: 'Consultando el corpus…',
       footer: 'Local · sin nube · fundado en un corpus curado y gobernado por licencia.',
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
-      grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar',
-      abstainTitle: 'Fuera del corpus',
-      abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
+      grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar', share: 'Enlace', shareCopied: 'Enlace copiado',
+      abstainTitle: 'Fuera del corpus', abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
       sourcesLabel: 'Fuentes recuperadas', lowConfidence: 'Coincidencia débil — lee con cautela.',
       stopLabel: 'Detener', stopped: 'Detenido',
+      historyTitle: 'Historial', historyEmpty: 'Aún no hay preguntas.', helpTitle: 'Atajos de teclado',
+      stats: ['fragmentos', 'documentos', 'niveles'],
+      kbds: [['/', 'Enfocar la pregunta'], ['Ctrl/⌘ + Enter', 'Enviar'], ['Esc', 'Limpiar o cerrar'], ['?', 'Esta ayuda']],
       chips: [
         "¿Cuánta agua se puede captar por cada milímetro de lluvia sobre un metro cuadrado de techo?",
         "¿En qué año fue introducida Rodolia cardinalis a California?",
@@ -188,15 +228,17 @@
     en: {
       tagline: 'Agronomy answers <em>with citations</em> — or an honest "I don\'t know".',
       ask: 'Ask',
-      hint: 'Ctrl+Enter to send · the first answer takes ~1–2 min (local model on CPU)',
+      hint: 'Ctrl+Enter send · / focus · ? shortcuts · ~1–2 min (local CPU)',
       loading: 'Searching the corpus…',
       footer: 'Local · no cloud · grounded in a curated, license-governed corpus.',
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
-      grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export',
-      abstainTitle: 'Outside the corpus',
-      abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
+      grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export', share: 'Link', shareCopied: 'Link copied',
+      abstainTitle: 'Outside the corpus', abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
       sourcesLabel: 'Retrieved sources', lowConfidence: 'Weak match — read with care.',
       stopLabel: 'Stop', stopped: 'Stopped',
+      historyTitle: 'History', historyEmpty: 'No questions yet.', helpTitle: 'Keyboard shortcuts',
+      stats: ['chunks', 'documents', 'tiers'],
+      kbds: [['/', 'Focus the question'], ['Ctrl/⌘ + Enter', 'Send'], ['Esc', 'Clear or close'], ['?', 'This help']],
       chips: [
         "How much water can be harvested per millimetre of rain on a square metre of roof?",
         "In what year was Rodolia cardinalis introduced to California?",
@@ -206,14 +248,21 @@
     }
   };
 
-  const q = document.getElementById('q');
-  const ask = document.getElementById('ask');
-  const answer = document.getElementById('answer');
-  const chips = document.getElementById('chips');
-  const counter = document.getElementById('counter');
-  const themeBtn = document.getElementById('themeBtn');
+  const SURPRISE = [
+    "¿Cuánta agua se puede captar por cada milímetro de lluvia sobre un metro cuadrado de techo?",
+    "¿En qué año fue introducida Rodolia cardinalis a California?",
+    "What stocking density does the FAO guide recommend for aquaponic fish?",
+    "¿Qué profundidad de caja basta para el método Square Foot Gardening?",
+    "How wide are the standardized permanent beds in market gardening?",
+    "¿Qué altura puede alcanzar un avellano europeo de la variedad Barcelona?",
+    "¿Cuál es el precio de exportación de la avellana chilena a China?",
+    "What nitrogen dose does INIA recommend for quinoa in Los Lagos?"
+  ];
+
+  const q = document.getElementById('q'), ask = document.getElementById('ask'), answer = document.getElementById('answer');
+  const chips = document.getElementById('chips'), counter = document.getElementById('counter'), themeBtn = document.getElementById('themeBtn');
   const ABSTAIN = 'no encuentro la respuesta en el contexto disponible';
-  let lastQuestion = '';
+  let lastQuestion = '', statsData = null;
 
   /* ---------- theme ---------- */
   const THEME_KEY = 'agroteca-theme';
@@ -223,7 +272,7 @@
   applyTheme(localStorage.getItem(THEME_KEY));
   themeBtn.onclick = () => { const next = currentIsDark() ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, next); applyTheme(next); };
 
-  /* ---------- language / i18n ---------- */
+  /* ---------- language ---------- */
   let currentLang = (navigator.language || 'es').toLowerCase().startsWith('es') ? 'es' : 'en';
   function buildChips(list) {
     chips.innerHTML = '';
@@ -237,6 +286,12 @@
       chips.appendChild(c);
     });
   }
+  function renderStats() {
+    const el = document.getElementById('statsRibbon');
+    if (!el || !statsData) return;
+    const L = I18N[currentLang].stats;
+    el.textContent = statsData.chunks.toLocaleString() + ' ' + L[0] + ' · ' + statsData.documents + ' ' + L[1] + ' · ' + statsData.tiers + ' ' + L[2] + ' · ES/EN';
+  }
   function setLang(lang) {
     const t = I18N[lang];
     currentLang = lang; document.documentElement.lang = lang;
@@ -244,9 +299,12 @@
     ask.textContent = t.ask;
     document.getElementById('hint').textContent = t.hint;
     document.getElementById('footer').textContent = t.footer;
+    document.getElementById('histTitle').textContent = t.historyTitle;
+    document.getElementById('helpTitle').textContent = t.helpTitle;
     buildChips(t.chips);
     document.querySelectorAll('.langtoggle button').forEach(b => { const on = b.dataset.lang === lang; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on); });
     phIdx = 0; q.setAttribute('placeholder', t.chips[0]);
+    renderStats();
   }
   document.querySelectorAll('.langtoggle button').forEach(b => b.onclick = () => setLang(b.dataset.lang));
 
@@ -256,62 +314,93 @@
   let phIdx = 0, phTimer = setInterval(() => { if (document.activeElement === q || q.value) return; const list = I18N[currentLang].chips; phIdx = (phIdx + 1) % list.length; q.setAttribute('placeholder', list[phIdx]); }, 3600);
   setLang(currentLang);
 
-  /* ---------- evidence helpers (Wave C) ---------- */
+  /* ---------- evidence helpers ---------- */
   function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
   function hasCitation(t) { return /\([^)]{4,}\)/.test(t); }
-  function fmtMs(ms) {
-    if (ms < 1000) return ms + 'ms';
-    const s = ms / 1000;
-    if (s < 90) return s.toFixed(0) + 's';
-    const m = Math.floor(s / 60), r = Math.round(s % 60);
-    return m + 'm' + (r ? ' ' + r + 's' : '');
-  }
+  function fmtMs(ms) { if (ms < 1000) return ms + 'ms'; const s = ms / 1000; if (s < 90) return s.toFixed(0) + 's'; const m = Math.floor(s / 60), r = Math.round(s % 60); return m + 'm' + (r ? ' ' + r + 's' : ''); }
   function scorePct(s) { return Math.round(Math.max(0, Math.min(1, (s + 1) / 1.6)) * 100); }
-  function tierBadge(tier) {
-    const map = { open: ['tier-open', 'open'], synthetic: ['tier-syn', 'synthetic'], local: ['tier-local', 'local'], distractor: ['tier-dist', 'distractor'] };
-    const e = map[tier] || ['tier-unk', tier || '?'];
-    return '<span class="tier ' + e[0] + '">' + esc(e[1]) + '</span>';
-  }
+  function tierBadge(tier) { const map = { open: ['tier-open', 'open'], synthetic: ['tier-syn', 'synthetic'], local: ['tier-local', 'local'], distractor: ['tier-dist', 'distractor'] }; const e = map[tier] || ['tier-unk', tier || '?']; return '<span class="tier ' + e[0] + '">' + esc(e[1]) + '</span>'; }
   function renderSources(meta) {
     if (!meta || !meta.sources || !meta.sources.length) return '';
     const t = I18N[currentLang];
     const low = meta.sources[0].score < 0 ? '<div class="lowconf">⚠ ' + t.lowConfidence + '</div>' : '';
     const rows = meta.sources.map(s =>
-      '<div class="src"><div class="src-head">' + tierBadge(s.tier)
-      + '<span class="src-name">' + esc(s.source) + '</span>'
-      + '<span class="src-score">' + s.score.toFixed(2) + '</span></div>'
-      + '<div class="scorebar"><span style="width:' + scorePct(s.score) + '%"></span></div>'
-      + '<div class="src-snip">' + esc(s.snippet) + '…</div></div>'
+      '<div class="src"><div class="src-head">' + tierBadge(s.tier) + '<span class="src-name">' + esc(s.source) + '</span><span class="src-score">' + s.score.toFixed(2) + '</span></div>'
+      + '<div class="scorebar"><span style="width:' + scorePct(s.score) + '%"></span></div><div class="src-snip">' + esc(s.snippet) + '…</div></div>'
     ).join('');
-    return '<details class="sources"><summary>' + t.sourcesLabel + ' · ' + meta.sources.length
-      + ' · <span class="latency">' + fmtMs(meta.retrieval_ms) + '</span></summary>' + low + rows + '</details>';
+    return '<details class="sources"><summary>' + t.sourcesLabel + ' · ' + meta.sources.length + ' · <span class="latency">' + fmtMs(meta.retrieval_ms) + '</span></summary>' + low + rows + '</details>';
   }
 
   function finalize(text, meta, doneMsg) {
     const t = I18N[currentLang];
     const main = answer.querySelector('.answer-main');
     if (text.toLowerCase().includes(ABSTAIN)) {
-      main.innerHTML = '<div class="empty"><div class="empty-icon" aria-hidden="true">🧺</div>'
-        + '<div class="empty-title">' + t.abstainTitle + '</div>'
-        + '<div class="empty-text">' + t.abstainText + '</div></div>';
+      main.innerHTML = '<div class="empty"><div class="empty-icon" aria-hidden="true">🧺</div><div class="empty-title">' + t.abstainTitle + '</div><div class="empty-text">' + t.abstainText + '</div></div>';
     } else {
       const bar = document.createElement('div');
       bar.className = 'actionbar';
       bar.innerHTML = (hasCitation(text) ? '<span class="seal">🌿 ' + t.grounded + '</span>' : '')
         + '<span class="modelbadge">qwen2.5:3b · local</span><span class="spacer"></span>'
         + '<button class="act" data-a="copy">📋 ' + t.copy + '</button>'
+        + '<button class="act" data-a="share">🔗 ' + t.share + '</button>'
         + '<button class="act" data-a="export">⬇ ' + t.exportLabel + '</button>'
-        + '<button class="act" data-a="up" aria-label="good">👍</button>'
-        + '<button class="act" data-a="down" aria-label="bad">👎</button>';
+        + '<button class="act" data-a="up" aria-label="good">👍</button><button class="act" data-a="down" aria-label="bad">👎</button>';
       main.appendChild(bar);
       bar.querySelector('[data-a=copy]').onclick = (e) => { navigator.clipboard.writeText(text); const b = e.currentTarget; b.textContent = '✓ ' + t.copied; setTimeout(() => { b.textContent = '📋 ' + t.copy; }, 1600); };
+      bar.querySelector('[data-a=share]').onclick = (e) => { navigator.clipboard.writeText(location.origin + '/?q=' + encodeURIComponent(lastQuestion)); const b = e.currentTarget; b.textContent = '✓ ' + t.shareCopied; setTimeout(() => { b.textContent = '🔗 ' + t.share; }, 1600); };
       bar.querySelector('[data-a=export]').onclick = () => { const md = '# ' + lastQuestion + '\n\n' + text + '\n'; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' })); a.download = 'agroteca-answer.md'; a.click(); URL.revokeObjectURL(a.href); };
       const up = bar.querySelector('[data-a=up]'), down = bar.querySelector('[data-a=down]');
-      const vote = v => { up.classList.toggle('on', v === 'up'); down.classList.toggle('on', v === 'down'); try { localStorage.setItem('agroteca-fb-' + btoa(unescape(encodeURIComponent(lastQuestion))).slice(0, 28), v); } catch (_) {} };
+      const vote = v => {
+        up.classList.toggle('on', v === 'up'); down.classList.toggle('on', v === 'down');
+        fetch('/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: lastQuestion, vote: v, answer_preview: text.slice(0, 200) }) }).catch(() => {});
+      };
       up.onclick = () => vote('up'); down.onclick = () => vote('down');
     }
     if (meta && doneMsg) { const lat = answer.querySelector('.latency'); if (lat) lat.textContent = fmtMs(meta.retrieval_ms) + ' + ' + fmtMs(doneMsg.generation_ms); }
   }
+
+  /* ---------- history ---------- */
+  const HKEY = 'agroteca-history';
+  function loadHistory() { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (_) { return []; } }
+  function saveHistory(question) { let h = loadHistory().filter(x => x.q !== question); h.unshift({ q: question, ts: Date.now() }); localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 20))); }
+  function renderHistory() {
+    const list = document.getElementById('histList'), h = loadHistory();
+    if (!h.length) { list.innerHTML = '<div class="hist-empty">' + I18N[currentLang].historyEmpty + '</div>'; return; }
+    list.innerHTML = h.map(x => '<button class="hist-item" data-q="' + encodeURIComponent(x.q) + '">' + esc(x.q) + '</button>').join('');
+    list.querySelectorAll('.hist-item').forEach(b => b.onclick = () => { q.value = decodeURIComponent(b.dataset.q); onInput(); closeHistory(); run(); });
+  }
+  function openHistory() { renderHistory(); document.getElementById('histPanel').classList.add('open'); document.getElementById('scrim').classList.add('show'); }
+  function closeHistory() { document.getElementById('histPanel').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); }
+  document.getElementById('histBtn').onclick = openHistory;
+  document.getElementById('histClose').onclick = closeHistory;
+  document.getElementById('scrim').onclick = closeHistory;
+
+  /* ---------- help modal ---------- */
+  function renderHelp() { document.getElementById('kbds').innerHTML = I18N[currentLang].kbds.map(r => '<div class="kbd-row"><kbd>' + esc(r[0]) + '</kbd><span>' + esc(r[1]) + '</span></div>').join(''); }
+  function openHelp() { renderHelp(); document.getElementById('help').classList.add('open'); }
+  function closeHelp() { document.getElementById('help').classList.remove('open'); }
+  document.getElementById('helpClose').onclick = closeHelp;
+  document.getElementById('help').onclick = (e) => { if (e.target.id === 'help') closeHelp(); };
+
+  /* ---------- keyboard shortcuts ---------- */
+  document.addEventListener('keydown', e => {
+    const typing = document.activeElement === q;
+    if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); }
+    else if (e.key === '?' && !typing) { e.preventDefault(); openHelp(); }
+    else if (e.key === 'Escape') {
+      if (document.getElementById('histPanel').classList.contains('open')) closeHistory();
+      else if (document.getElementById('help').classList.contains('open')) closeHelp();
+      else if (typing) { q.value = ''; onInput(); }
+    }
+  });
+
+  /* ---------- surprise-me ---------- */
+  document.getElementById('surprise').onclick = () => { q.value = SURPRISE[Math.floor(Math.random() * SURPRISE.length)]; onInput(); run(); };
+
+  /* ---------- health + stats + shared link ---------- */
+  function pollHealth() { fetch('/health').then(r => r.ok).catch(() => false).then(ok => { const d = document.getElementById('healthdot'); if (d) d.className = 'dot ' + (ok ? 'ok' : 'down'); }); }
+  pollHealth(); setInterval(pollHealth, 20000);
+  fetch('/stats').then(r => r.json()).then(s => { statsData = s; renderStats(); }).catch(() => {});
 
   /* ---------- the life-cycle reel ---------- */
   const SPROUT = ['🌰', '🌱', '🌿', '🌸', '🍎'];
@@ -322,6 +411,7 @@
     const question = q.value.trim();
     if (!question) return;
     lastQuestion = question;
+    history.replaceState(null, '', '?q=' + encodeURIComponent(question));
     ask.disabled = true;
     abortCtrl = new AbortController();
     const startT = Date.now();
@@ -353,20 +443,17 @@
         buf += decoder.decode(value, { stream: true });
         let nl;
         while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
           if (!line) continue;
           let msg; try { msg = JSON.parse(line); } catch (_) { continue; }
           if (msg.type === 'meta') {
             meta = msg;
           } else if (msg.type === 'token') {
             if (!streamEl) {
-              stopSprout();
-              firstT = Date.now();
+              stopSprout(); firstT = Date.now();
               answer.innerHTML = '<div class="streamstats" id="stats"><span id="statstext"></span><button class="stopbtn" id="stop2"></button></div>'
                 + '<div class="answer-main"><span class="answer-text" id="stream"></span><span class="cursor"></span></div>' + renderSources(meta);
-              streamEl = document.getElementById('stream');
-              statTextEl = document.getElementById('statstext');
+              streamEl = document.getElementById('stream'); statTextEl = document.getElementById('statstext');
               const s2 = document.getElementById('stop2'); s2.textContent = I18N[currentLang].stopLabel; s2.onclick = () => abortCtrl.abort();
             }
             tokCount++;
@@ -377,6 +464,7 @@
             const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
             const st = document.getElementById('stats'); if (st) st.remove();
             if (streamEl) finalize(streamEl.textContent, meta, msg);
+            saveHistory(lastQuestion);
           }
         }
       }
@@ -387,19 +475,20 @@
         const main = answer.querySelector('.answer-main');
         const note = '<div class="stopped">■ ' + I18N[currentLang].stopped + '</div>';
         if (main) main.insertAdjacentHTML('beforeend', note); else answer.innerHTML = note;
-      } else {
-        answer.textContent = I18N[currentLang].error(e.message);
-      }
+      } else { answer.textContent = I18N[currentLang].error(e.message); }
     } finally {
-      stopSprout();
-      clearInterval(elapsedTimer);
-      ask.disabled = false;
-      abortCtrl = null;
+      stopSprout(); clearInterval(elapsedTimer); ask.disabled = false; abortCtrl = null;
     }
   }
 
   ask.onclick = run;
   q.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } });
+
+  /* ---------- shared ?q= link: prefill and auto-ask ---------- */
+  (function () {
+    const shared = new URLSearchParams(location.search).get('q');
+    if (shared) { q.value = shared; onInput(); run(); }
+  })();
 </script>
 </body>
 </html>

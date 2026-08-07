@@ -13,3 +13,4 @@ wheels/
 __pycache__/
 data/raw/
 *.db
+feedback.jsonl
