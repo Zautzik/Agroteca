@@ -6,6 +6,19 @@
 >
 > **The number that matters:** retrieval@5 **0.32 (dense) → 0.42 (hybrid) → 0.74 (reranked)** — every step measured against a golden set built *before* the retriever existed.
 
+**Stack:** Python · FastAPI · Postgres + pgvector · full-text search · fastembed (ONNX) · a multilingual cross-encoder reranker · Ollama (local LLM) · `uv` · Docker · a self-contained streaming web front end.
+
+---
+
+## Highlights
+
+- **Eval-first, and it earned its keep.** The 22-question golden set was written *before* the retriever, so every change is measured, not guessed — and it once flagged a "hallucination" that turned out to be a **mislabeled ground-truth answer** (I fixed the label, not the model).
+- **A measured retrieval cascade.** dense → hybrid (Reciprocal Rank Fusion) → cross-encoder reranking, each stage's gain proven on the golden set: **retrieval@5 0.32 → 0.42 → 0.74**, six questions fixed with **zero regressions**.
+- **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources, and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
+- **A transparency-first web app.** A bilingual, streaming UI where every answer opens a drawer exposing the exact retrieved chunks, their cross-encoder relevance scores, and governance tiers — plus a retrieval-vs-generation latency breakdown. *Show your work.*
+- **Provenance as a first-class concern.** A four-tier governed corpus (open / local-only / synthetic / distractor) where the tier controls where a document may appear; copyrighted material is confined to a local-only mode and never shipped publicly.
+- **Local-first, measured model choices.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput and quality — not by hype.
+
 ---
 
 ## What it is

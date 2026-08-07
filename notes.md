@@ -1,5 +1,7 @@
 # I Wrote the Final Exam Before I Built the Student
 
+> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.32 → 0.42 → 0.74** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app. The through-line: *measure before you build, distrust your own metrics, show your work, and know when to say "I don't know."*
+
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
 Most RAG tutorials follow the same five-step recipe: load documents, embed them, search, answer, ship. It takes an afternoon and produces something that demos beautifully for exactly three questions and falls apart on the fourth.
