@@ -5,6 +5,8 @@ good recall), then re-score those ~20 candidates with a **multilingual cross-enc
 (`jinaai/jina-reranker-v2-base-multilingual`) that reads each `(query, chunk)` pair
 *together*. The cross-encoder runs only on the small pool, never the whole corpus.
 
+> **Reconciliation note.** These figures were measured on the **n=19** answerable golden set, *before* the Phase-5 correction of the mislabeled question **q18**. Correcting it grew the set to **n=20** and nudged the numbers up (answer@5: dense **0.35**, hybrid **0.45**, rerank **0.75**; doc@5 rerank **0.90**). Current authoritative figures: [`eval/results.csv`](../eval/results.csv). The story is unchanged — dense → hybrid → rerank, **+6 fixed, 0 regressions**, lexical > hybrid at k=5.
+
 ## Results (answerable golden set, n=19, k=5)
 
 | method | answer@5 | doc@5 |

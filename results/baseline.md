@@ -2,6 +2,8 @@
 
 The "before" number for the baseline→final story. Dense-only retrieval, no hybrid, no rerank.
 
+> **Reconciliation note.** These are the **n=19** figures, measured *before* the Phase-5 q18 correction (which grew the answerable set to **n=20**). On the current set the dense baseline is **0.35 / 0.65**; authoritative figures live in [`eval/results.csv`](../eval/results.csv). The diagnosis below (chunk-vs-document gap → reranking; recall ceiling → hybrid) is unchanged.
+
 **Setup**
 - Corpus: 71 docs, 10,330 chunks (tiers: open + synthetic + local).
 - Embedder: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, fastembed/ONNX, CPU).

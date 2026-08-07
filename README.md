@@ -4,7 +4,7 @@
 
 > **Status: Phases 1–7 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** with a retrieval-transparency drawer. Only public deployment remains.
 >
-> **The number that matters:** retrieval@5 **0.32 (dense) → 0.42 (hybrid) → 0.74 (reranked)** — every step measured against a golden set built *before* the retriever existed.
+> **The number that matters:** retrieval@5 **0.35 (dense) → 0.45 (hybrid) → 0.75 (reranked)** — every step measured against a golden set built *before* the retriever existed (20 answerable questions).
 
 **Stack:** Python · FastAPI · Postgres + pgvector · full-text search · fastembed (ONNX) · a multilingual cross-encoder reranker · Ollama (local LLM) · `uv` · Docker · a self-contained streaming web front end.
 
@@ -13,7 +13,7 @@
 ## Highlights
 
 - **Eval-first, and it earned its keep.** The 22-question golden set was written *before* the retriever, so every change is measured, not guessed — and it once flagged a "hallucination" that turned out to be a **mislabeled ground-truth answer** (I fixed the label, not the model).
-- **A measured retrieval cascade.** dense → hybrid (Reciprocal Rank Fusion) → cross-encoder reranking, each stage's gain proven on the golden set: **retrieval@5 0.32 → 0.42 → 0.74**, six questions fixed with **zero regressions**.
+- **A measured retrieval cascade.** dense → hybrid (Reciprocal Rank Fusion) → cross-encoder reranking, each stage's gain proven on the golden set: **retrieval@5 0.35 → 0.45 → 0.75**, six questions fixed with **zero regressions**.
 - **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources, and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
 - **A transparency-first web app.** A bilingual, streaming UI where every answer opens a drawer exposing the exact retrieved chunks, their cross-encoder relevance scores, and governance tiers — plus a retrieval-vs-generation latency breakdown. *Show your work.*
 - **Provenance as a first-class concern.** A four-tier governed corpus (open / local-only / synthetic / distractor) where the tier controls where a document may appear; copyrighted material is confined to a local-only mode and never shipped publicly.
@@ -92,13 +92,13 @@ Measured on the answerable golden set (k=5), one variable at a time:
 
 | Stage | answer-chunk@5 | document@5 |
 |---|---|---|
-| Dense (semantic baseline) | 0.32 | 0.63 |
-| + Lexical, fused with RRF (hybrid) | 0.42 | 0.63 |
-| **+ Cross-encoder reranking** | **0.74** | **0.89** |
+| Dense (semantic baseline) | 0.35 | 0.65 |
+| + Lexical, fused with RRF (hybrid) | 0.45 | 0.65 |
+| **+ Cross-encoder reranking** | **0.75** | **0.90** |
 
 Reranking fixed **six** questions the earlier stages missed, with **zero regressions**. On generation, the system **abstains on the corpus's genuinely unanswerable questions** rather than fabricating, and a **3B local model matched a 7B on abstention at ~3× lower latency** — chosen by measurement, not assumption.
 
-> An honest footnote (because honesty is the brand): lexical search *alone* scored 0.47 at k=5 — higher than the 0.42 hybrid, an RRF nuance at small k. It's exactly why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
+> An honest footnote (because honesty is the brand): lexical search *alone* scored 0.50 at k=5 — higher than the 0.45 hybrid, an RRF nuance at small k. It's exactly why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
 
 ---
 
@@ -129,9 +129,9 @@ uv run uvicorn agroteca.api:app --reload
 | Phase | Deliverable | Ship criterion | Status |
 |---|---|---|---|
 | 1 | Golden set + governed corpus + validator | validator passes; corpus tiered & text-verified | ✅ **done** |
-| 2 | Ingestion: normalize → chunk → embed → pgvector + FTS | corpus indexed (10,330 chunks); `retrieval@5` baseline measured | ✅ **done** → 0.32 |
-| 3 | Hybrid retrieval (dense + lexical) fused with RRF | the number moves vs the dense baseline | ✅ **done** → 0.42 |
-| 4 | Cross-encoder reranking (precision stage) | rerank@5 beats hybrid on the golden set | ✅ **done** → 0.74 |
+| 2 | Ingestion: normalize → chunk → embed → pgvector + FTS | corpus indexed (10,330 chunks); `retrieval@5` baseline measured | ✅ **done** → 0.35 |
+| 3 | Hybrid retrieval (dense + lexical) fused with RRF | the number moves vs the dense baseline | ✅ **done** → 0.45 |
+| 4 | Cross-encoder reranking (precision stage) | rerank@5 beats hybrid on the golden set | ✅ **done** → 0.75 |
 | 5 | Grounded, **cited**, **abstaining** generation (local LLM) | answers are cited; no-answer questions abstain | ✅ **done** |
 | 6 | Serving: FastAPI + token streaming (NDJSON evidence stream) | a request streams a cited answer end-to-end | ✅ **done** |
 | 7 | Web app: bilingual streaming UI + retrieval-transparency drawer | grounded/cited answer *or* honest abstention, evidence one click away | ✅ **done** |

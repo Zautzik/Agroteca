@@ -4,6 +4,8 @@ Same corpus/index as the baseline (10,330 chunks, MiniLM-384, unchanged embeddin
 The only change: a lexical retriever (Postgres FTS, `simple` config, OR-of-content-terms)
 fused with the dense retriever via Reciprocal Rank Fusion (k=60, 60 candidates each).
 
+> **Reconciliation note.** Measured on the **n=19** answerable golden set, *before* the Phase-5 q18 correction (which grew it to **n=20**). Current authoritative retrieval figures: [`eval/results.csv`](../eval/results.csv) (dense/hybrid/rerank answer@5 = **0.35 / 0.45 / 0.75**). The finding here — hybrid ≥ dense at every k, but hybrid@5 trails lexical@5 — still holds.
+
 ## Results (answerable golden set, n=19)
 
 | method | answer@5 | doc@5 | answer@10 | doc@10 |

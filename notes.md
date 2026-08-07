@@ -1,6 +1,6 @@
 # I Wrote the Final Exam Before I Built the Student
 
-> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.32 → 0.42 → 0.74** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app. The through-line: *measure before you build, distrust your own metrics, show your work, and know when to say "I don't know."*
+> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app. The through-line: *measure before you build, distrust your own metrics, show your work, and know when to say "I don't know."*
 
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
@@ -103,11 +103,11 @@ In Part 1 I wrote the final exam before I built the student, then spent the whol
 
 Here's the whole arc in one line, and then I'll earn it:
 
-> **retrieval@5:  0.32  →  0.42  →  0.74**
+> **retrieval@5:  0.35  →  0.45  →  0.75**
 
 ## The humbling first number
 
-The first real system was the boring one: embed every chunk, embed the question, return the nearest neighbours by cosine similarity. Pure semantic search. It scored **0.32** — meaning the exact answer chunk landed in the top 5 about a third of the time.
+The first real system was the boring one: embed every chunk, embed the question, return the nearest neighbours by cosine similarity. Pure semantic search. It scored **0.35** — meaning the exact answer chunk landed in the top 5 about a third of the time.
 
 That's not a good number. It's a *baseline*, and the point of a baseline isn't to impress anyone — it's to give you something to beat, honestly, with the next idea. You cannot improve what you refuse to measure, and you cannot measure improvement without a starting line you're a little embarrassed by.
 
@@ -115,9 +115,9 @@ That's not a good number. It's a *baseline*, and the point of a baseline isn't t
 
 Semantic search has a specific, predictable blind spot: exact strings. Ask it for the alfalfa variety `WL-323` and it will warmly return "alfalfa varieties, in general." So I added a second retriever — Postgres full-text search, which is *only* good at exact tokens — and fused the two rankings with Reciprocal Rank Fusion. (RRF fuses by *rank*, not score, because a cosine distance and a full-text rank aren't the same currency; adding them is a category error.)
 
-Hybrid scored **0.42**. Up from 0.32. Ship it, right?
+Hybrid scored **0.45**. Up from 0.35. Ship it, right?
 
-Except here's the twist I could have quietly buried: lexical search *by itself* scored **0.47** — higher than my clever hybrid. My fusion had *diluted* a strong retriever with a weaker one's noise, an RRF quirk that shows up at small k. I know this only because the eval let me *see* it. A junior reports 0.42 and takes a bow. The ruler told me hybrid wasn't the finish line — which turned out to be the most useful thing it ever said.
+Except here's the twist I could have quietly buried: lexical search *by itself* scored **0.50** — higher than my clever hybrid. My fusion had *diluted* a strong retriever with a weaker one's noise, an RRF quirk that shows up at small k. I know this only because the eval let me *see* it. A junior reports 0.45 and takes a bow. The ruler told me hybrid wasn't the finish line — which turned out to be the most useful thing it ever said.
 
 (There was a bug on the way, too: full-text search kept returning nothing. Postgres's `websearch_to_tsquery` ANDs every term by default, so a whole-sentence question demanded one chunk contain *every* word — and none did. Lexical scored a perfect 0.00 until I rebuilt the query as an OR of the content words. Read the tool's defaults before you trust its output.)
 
@@ -125,9 +125,9 @@ Except here's the twist I could have quietly buried: lexical search *by itself* 
 
 The finish line was a **cross-encoder**. A normal embedding model judges the question and a chunk *separately* and compares the results — fast, but a little shallow. A cross-encoder reads the question and the chunk *together*, as one input, and scores how well they actually answer each other. It's far sharper and far slower — so you never run it on the whole corpus. You run it on the top 20 the cheap retrievers already found, and let it re-sort them.
 
-That step took retrieval@5 from 0.42 to **0.74**. It fixed six questions the earlier stages had missed, and broke *zero*. Pure gain.
+That step took retrieval@5 from 0.45 to **0.75**. It fixed six questions the earlier stages had missed, and broke *zero*. Pure gain.
 
-And it handed me the cleanest lesson in measurement discipline of the whole build. When I eyeballed a single reranked query, the top result looked like *garbage* — a weeds table, a title page, a bibliography. If I'd trusted my eyes I'd have declared the reranker broken and ripped it out. But the aggregate over all 22 questions said 0.74. **Trust the ruler, not the vibe.** One query is an anecdote; the golden set is evidence.
+And it handed me the cleanest lesson in measurement discipline of the whole build. When I eyeballed a single reranked query, the top result looked like *garbage* — a weeds table, a title page, a bibliography. If I'd trusted my eyes I'd have declared the reranker broken and ripped it out. But the aggregate over the answerable set said 0.75. **Trust the ruler, not the vibe.** One query is an anecdote; the golden set is evidence.
 
 ## The model I didn't use
 
