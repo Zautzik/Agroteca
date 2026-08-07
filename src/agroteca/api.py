@@ -1,24 +1,23 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from fastapi.responses import StreamingResponse   # add near the top
-from agroteca.generate import answer, answer_stream  
 from pathlib import Path
-from fastapi.responses import FileResponse # add answer_stream to this import
 
-from agroteca.generate import answer
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
+
+from agroteca.generate import answer_ndjson
 from agroteca.ingest import store
 
 app = FastAPI(title="Agroteca")
-
 STATIC = Path(__file__).parent / "static"
+
+
+class Question(BaseModel):
+    question: str
+
 
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
-
-
-class Question(BaseModel):      # the shape of the POST body: {"question": "..."}
-    question: str
 
 
 @app.get("/health")
@@ -28,11 +27,16 @@ def health():
 
 @app.post("/ask/stream")
 def ask_stream(payload: Question):
+    """Stream the answer as NDJSON: a meta frame (retrieved sources + scores +
+    tiers + timing), then token frames, then a done frame (generation timing).
+    Sync `def` so the blocking, CPU-bound work runs in a threadpool."""
     conn = store.connect()
+
     def gen():
         try:
-            for token in answer_stream(conn, payload.question):
-                yield token
+            for line in answer_ndjson(conn, payload.question):
+                yield line
         finally:
-            conn.close()          # close only after streaming finishes
-    return StreamingResponse(gen(), media_type="text/plain")
+            conn.close()
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")

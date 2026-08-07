@@ -34,3 +34,20 @@ def rerank_search(conn, query: str, k: int = 5,
     scores = list(_reranker().rerank(query, texts))        # cross-encoder score per pair
     ranked = sorted(zip(pool, scores), key=lambda p: p[1], reverse=True)
     return [row for row, _score in ranked[:k]]
+
+
+def rerank_scored(conn, query: str, k: int = 5,
+                  candidates: int | None = None, tiers: list[str] | None = None):
+    """Like rerank_search, but keeps the cross-encoder score for transparency.
+
+    Returns [(chunk_id, source_file, text, score), ...] — the score lets the UI
+    show a relevance meter and flag low-confidence matches.
+    """
+    candidates = candidates or settings.rerank_candidates
+    pool = hybrid_search(conn, query, k=candidates, tiers=tiers)
+    if not pool:
+        return []
+    texts = [row[2] for row in pool]
+    scores = list(_reranker().rerank(query, texts))
+    ranked = sorted(zip(pool, scores), key=lambda p: p[1], reverse=True)
+    return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]
