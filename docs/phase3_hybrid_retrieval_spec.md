@@ -1,5 +1,7 @@
 # Phase 3 — Hybrid Retrieval + Reciprocal Rank Fusion: Spec + Teaching Guide
 
+> **Historical spec (n=19).** The baseline figures below (`0.32` / `0.63`) are the pre-correction Phase-2 diagnosis that motivated this design. After the Phase-5 q18 relabel the answerable set is **n=20** — current retrieval figures live in [`eval/results.csv`](../eval/results.csv). The *diagnosis* here (chunk-vs-document gap, recall ceiling) is what drove the design and is unchanged.
+
 Phase 2 gave us a baseline and, more valuably, a diagnosis: `retrieval@5 = 0.32` (answer-chunk) /
 `0.63` (document). Two failure modes, written in the misses:
 
