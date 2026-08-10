@@ -114,6 +114,7 @@
   .tier-local { color: #4a4a44; background: #e0dacb; }
   .tier-dist { color: #7a2020; background: #f0c7c0; }
   .tier-unk { color: var(--muted); background: var(--chip-bg); }
+  .src-page { color: var(--muted); font-weight: 600; font-size: 11px; }
 
   .loading { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 0 8px; }
   .sprout { font-size: 48px; line-height: 1; display: inline-block; animation: sproutPop 1.1s ease-in-out infinite; }
@@ -325,7 +326,7 @@
     const t = I18N[currentLang];
     const low = meta.sources[0].score < 0 ? '<div class="lowconf">⚠ ' + t.lowConfidence + '</div>' : '';
     const rows = meta.sources.map(s =>
-      '<div class="src"><div class="src-head">' + tierBadge(s.tier) + '<span class="src-name">' + esc(s.source) + '</span><span class="src-score">' + s.score.toFixed(2) + '</span></div>'
+      '<div class="src"><div class="src-head">' + tierBadge(s.tier) + '<span class="src-name">' + esc(s.source) + (s.page ? ' <span class="src-page">· p. ' + s.page + '</span>' : '') + '</span><span class="src-score">' + s.score.toFixed(2) + '</span></div>'
       + '<div class="scorebar"><span style="width:' + scorePct(s.score) + '%"></span></div><div class="src-snip">' + esc(s.snippet) + '…</div></div>'
     ).join('');
     return '<details class="sources"><summary>' + t.sourcesLabel + ' · ' + meta.sources.length + ' · <span class="latency">' + fmtMs(meta.retrieval_ms) + '</span></summary>' + low + rows + '</details>';

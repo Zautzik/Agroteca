@@ -17,22 +17,25 @@ SYSTEM_PROMPT = """You are an agronomy assistant. Answer the QUESTION using ONLY
 
 RULES:
 1. GROUND — base every statement only on the CONTEXT. Never use outside knowledge.
-2. CITE — after each claim, name its source in parentheses, e.g. (Libro_INIA_04.pdf).
+2. CITE — after each claim, name its source in parentheses, e.g. (Libro_INIA_04.pdf, p. 37).
 3. ABSTAIN — if the CONTEXT does not contain the answer, reply with EXACTLY this line and nothing else:
    No encuentro la respuesta en el contexto disponible.
    Never invent an answer. Never bend this rule to please the user.
 4. Answer in the same language as the QUESTION."""
 
 
-def format_context(rows) -> str:
-    """rows: list of (chunk_id, source_file, text) from rerank_search.
-    Return ONE string: each chunk labeled with its source, blank line between chunks.
-    """
-    def format_chunk(chunk_id, source_file, text):
-        # chunk_id is ignored for the final context (kept for traceability if needed later)
-        return f"[Fuente: {source_file}]\n{text.strip()}"
+def _cite(source_file: str, page) -> str:
+    """Source label for a chunk — with the page number when we have it (verifiable citations)."""
+    return f"[Fuente: {source_file}, p. {page}]" if page else f"[Fuente: {source_file}]"
 
-    chunks = [format_chunk(*row) for row in rows]
+
+def format_context(rows, pages: dict | None = None) -> str:
+    """rows: list of (chunk_id, source_file, text). `pages`: {chunk_id: page} so each
+    chunk's source label carries the page it came from. Returns ONE string, chunks
+    separated by a blank line.
+    """
+    pages = pages or {}
+    chunks = [f"{_cite(sf, pages.get(cid))}\n{text.strip()}" for (cid, sf, text) in rows]
     return "\n\n".join(chunks)
 
 
@@ -52,14 +55,16 @@ def ask_ollama(system: str, user: str) -> str:
 def answer(conn, question: str, k: int = 5) -> str:
     """Retrieve the top-k chunks for the question, then generate a grounded, cited answer."""
     rows = rerank_search(conn, question, k=k)              # 1. real chunks from the corpus
-    context = format_context(rows)                         # 2. label each with its source
+    pages = {cid: pg for cid, (_t, pg) in _meta_for(conn, [r[0] for r in rows]).items()}
+    context = format_context(rows, pages)                  # 2. label each with source + page
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"  # 3. build the user message
     return ask_ollama(SYSTEM_PROMPT, user)                 # 4. ground + cite (or abstain)
 
 def answer_stream(conn, question: str, k: int = 5):
     """Like answer(), but YIELDS the reply token-by-token as the model generates it."""
     rows = rerank_search(conn, question, k=k)              # retrieval (the pre-token wait)
-    context = format_context(rows)
+    pages = {cid: pg for cid, (_t, pg) in _meta_for(conn, [r[0] for r in rows]).items()}
+    context = format_context(rows, pages)
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
     stream = _client.chat(
         model=settings.gen_model,
@@ -74,14 +79,16 @@ def answer_stream(conn, question: str, k: int = 5):
         yield chunk["message"]["content"]                  # <- hand over each token as it arrives
 
 
-def _tiers_for(conn, chunk_ids):
-    """Look up the governance tier for a set of chunk ids -> {chunk_id: tier}."""
+def _meta_for(conn, chunk_ids):
+    """Look up governance tier + page for a set of chunk ids -> {chunk_id: (tier, page)}.
+    `page` was already stored per chunk (chunk.py computes char offsets, run.py maps them
+    to a page) — it just never reached the citation until now."""
     if not chunk_ids:
         return {}
     rows = conn.execute(
-        "SELECT chunk_id, tier FROM chunks WHERE chunk_id = ANY(%s)", (list(chunk_ids),)
+        "SELECT chunk_id, tier, page FROM chunks WHERE chunk_id = ANY(%s)", (list(chunk_ids),)
     ).fetchall()
-    return {cid: tier for cid, tier in rows}
+    return {cid: (tier, page) for cid, tier, page in rows}
 
 
 def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
@@ -93,16 +100,17 @@ def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
     """
     t0 = time.perf_counter()
     rows = rerank_scored(conn, question, k=k)
-    tiers = _tiers_for(conn, [r[0] for r in rows])
+    meta = _meta_for(conn, [r[0] for r in rows])
     retrieval_ms = int((time.perf_counter() - t0) * 1000)
 
     sources = [
-        {"source": sf, "tier": tiers.get(cid, "?"),
+        {"source": sf, "tier": meta.get(cid, ("?", None))[0], "page": meta.get(cid, ("?", None))[1],
          "score": round(sc, 3), "snippet": text.strip()[:240]}
         for (cid, sf, text, sc) in rows
     ]
     meta_line = json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms}) + "\n"
-    context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows])
+    pages = {cid: meta.get(cid, ("?", None))[1] for (cid, sf, text, sc) in rows}
+    context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows], pages)
     return meta_line, context
 
 
