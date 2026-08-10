@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     db_url: str = "postgresql://postgres:agroteca@localhost:5433/agroteca"
 
     # --- embedding model ---
-    # Baseline: MiniLM-L12 multilingual (384-dim) — ~10x faster on CPU than e5-large,
-    # gets us a full-corpus baseline in minutes. Quality upgrade path (documented):
+    # Baseline: MiniLM-L12 multilingual (384-dim). MEASURED ~50x faster on CPU than
+    # e5-large (eval/bench_embed.py: 20.6 vs 0.4 chunks/sec) — an ~8-min full re-index
+    # vs ~7 hours, and 19 vs 153 ms per query. Quality upgrade path (documented):
     # intfloat/multilingual-e5-large (1024-dim) or BGE-M3 — a config change + re-index.
     # NOTE: embed_dim MUST match the VECTOR(n) column in migrations/001_init.sql.
     # MiniLM does NOT need E5's "query:"/"passage:" prefixes.

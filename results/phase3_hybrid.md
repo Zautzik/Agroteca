@@ -18,8 +18,9 @@ fused with the dense retriever via Reciprocal Rank Fusion (k=60, 60 candidates e
 - **Hybrid ≥ dense at every k** (ship criterion met): answer@5 0.32→0.42; answer@10 0.32→0.63 (~2×).
   RRF fixed q05, q14 vs dense with **zero regressions**.
 - **Lexical alone beats dense** — expected: distinctive-term questions + a weak 384-dim dense model.
-- **Equal-weight RRF@5 (0.42) trails lexical@5 (0.47).** Fusing a weak dense retriever with a strong
-  lexical one dilutes precision at small k. Non-obvious, and the honest result.
+- **Equal-weight RRF@5 (0.42) trails lexical@5 (0.47)** — but at this n that answer@5 gap is a single
+  question, within noise. The sturdier evidence is **doc@5: lexical 0.84 vs hybrid 0.63 — a four-document
+  gap**: the fusion was diluting the stronger retriever's recall into the pool. Non-obvious, and the honest result.
 - **Hybrid's real contribution is recall into the candidate pool:** answer@10 = 0.63, doc@10 = 0.79.
   The answer chunk is in the fused top-10 ~63% of the time — the pool a reranker (Phase 4) needs.
 

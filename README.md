@@ -98,7 +98,14 @@ Measured on the answerable golden set (k=5), one variable at a time:
 
 Reranking fixed **six** questions the earlier stages missed, with **zero regressions**. On generation, the system **abstains on the corpus's genuinely unanswerable questions** rather than fabricating, and a **3B local model matched a 7B on abstention at ~3× lower latency** — chosen by measurement, not assumption.
 
-> An honest footnote (because honesty is the brand): lexical search *alone* scored 0.50 at k=5 — higher than the 0.45 hybrid, an RRF nuance at small k. It's exactly why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
+> An honest footnote (because honesty is the brand): lexical search *alone* scored 0.50 at answer@5 vs the 0.45 hybrid — but that's a **single question** at n=20, within noise. The evidence that actually matters is `doc@5`: **0.85 lexical vs 0.65 hybrid, a four-document gap** — equal-weight RRF was diluting the stronger retriever's recall. That's why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
+
+### Latency & what a public deploy actually serves — measured
+
+Two numbers an interviewer asks for, both measured (`eval/compare_retrievers.py`), not assumed:
+
+- **Latency (CPU, per stage).** Bi-encoder **retrieval is production-grade — p95 ≤ 250 ms** (dense 106 ms, hybrid 249 ms). The **cross-encoder reranker is the bottleneck at ~25 s p50 on CPU** — the same free/local-inference tax as generation, and sub-second on a GPU or hosted reranker with *no code change* (it only ever scores the ~20-candidate pool). Full table + levers, including a hybrid-only "fast mode": [`results/latency.md`](results/latency.md).
+- **The deployable corpus is smaller than the index.** ~30% of chunks are copyrighted (`local` tier, 11 docs) and can't be served publicly. On the **open + synthetic** corpus a stranger actually gets, the final cascade scores **0.65 answer@5 / 0.75 doc@5** (vs 0.75 / 0.90 on the full index) — lower *only* because two questions (q06, q12) are answered solely by docs a public server can't ship. Same cascade, zero regressions; see the `deploy` row in [`results.csv`](eval/results.csv).
 
 ---
 

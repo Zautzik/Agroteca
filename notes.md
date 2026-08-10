@@ -117,7 +117,7 @@ Semantic search has a specific, predictable blind spot: exact strings. Ask it fo
 
 Hybrid scored **0.45**. Up from 0.35. Ship it, right?
 
-Except here's the twist I could have quietly buried: lexical search *by itself* scored **0.50** — higher than my clever hybrid. My fusion had *diluted* a strong retriever with a weaker one's noise, an RRF quirk that shows up at small k. I know this only because the eval let me *see* it. A junior reports 0.45 and takes a bow. The ruler told me hybrid wasn't the finish line — which turned out to be the most useful thing it ever said.
+Except here's the twist I could have quietly buried: lexical search *by itself* scored **0.50** at answer@5 — higher than my clever hybrid's 0.45. On its own that's one question out of twenty, within noise; the number that made me *believe* it was `doc@5`, where lexical put the right document in the top five **0.85 of the time to hybrid's 0.65 — a four-document gap**. My equal-weight fusion had *diluted* a strong retriever with a weaker one's noise, an RRF quirk that shows up at small k. I know this only because the eval let me *see* it. A junior reports 0.45 and takes a bow. The ruler told me hybrid wasn't the finish line — which turned out to be the most useful thing it ever said.
 
 (There was a bug on the way, too: full-text search kept returning nothing. Postgres's `websearch_to_tsquery` ANDs every term by default, so a whole-sentence question demanded one chunk contain *every* word — and none did. Lexical scored a perfect 0.00 until I rebuilt the query as an OR of the content words. Read the tool's defaults before you trust its output.)
 
