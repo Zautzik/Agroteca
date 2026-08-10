@@ -20,6 +20,13 @@ def _reranker() -> TextCrossEncoder:
     return TextCrossEncoder(model_name=settings.rerank_model)
 
 
+def warm() -> None:
+    """Eagerly load + cache the cross-encoder. Call once at server startup so the
+    lru_cache cold-start can't race across FastAPI's sync-endpoint threadpool workers
+    (otherwise concurrent first requests could each load the 1.1 GB model)."""
+    _reranker()
+
+
 def rerank_search(conn, query: str, k: int = 5,
                   candidates: int | None = None, tiers: list[str] | None = None):
     """Retrieve a hybrid candidate pool, then re-rank it with the cross-encoder.

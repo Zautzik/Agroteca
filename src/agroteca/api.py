@@ -1,28 +1,43 @@
 import json
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agroteca.config import settings
 from agroteca.generate import answer_ndjson
 from agroteca.ingest import store
+from agroteca.ingest.embed import embed_query
+from agroteca.retrieve.rerank import warm as warm_reranker
 
-app = FastAPI(title="Agroteca")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm the heavy models once at startup. FastAPI runs sync endpoints in a threadpool,
+    # so without this the first few concurrent requests could each trip the
+    # lru_cache(maxsize=1) cold-start and load the 1.1 GB reranker several times over.
+    warm_reranker()          # load + cache the cross-encoder
+    embed_query("warm")      # load + cache the embedder
+    yield
+
+
+app = FastAPI(title="Agroteca", lifespan=lifespan)
 STATIC = Path(__file__).parent / "static"
 FEEDBACK_LOG = settings.root / "feedback.jsonl"
 
 
 class Question(BaseModel):
-    question: str
+    # Bounded: an unbounded string would flow straight into the FTS regex + tsquery.
+    question: str = Field(..., min_length=1, max_length=2000)
 
 
 class Feedback(BaseModel):
-    question: str
-    vote: str                 # "up" | "down"
-    answer_preview: str = ""
+    question: str = Field(..., max_length=2000)
+    vote: Literal["up", "down"]
+    answer_preview: str = Field("", max_length=5000)
 
 
 @app.get("/")
