@@ -19,7 +19,7 @@ _IS_E5 = "e5" in settings.embed_model.lower()
 @lru_cache(maxsize=1)
 def _model() -> TextEmbedding:
     # Downloads the ONNX weights on first use, then caches on disk.
-    return TextEmbedding(model_name=settings.embed_model)
+    return TextEmbedding(model_name=settings.embed_model, threads=settings.ort_threads)
 
 
 def embed_passages(texts: list[str]) -> list[np.ndarray]:

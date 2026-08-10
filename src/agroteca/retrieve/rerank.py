@@ -17,14 +17,14 @@ from agroteca.retrieve.hybrid import hybrid_search
 @lru_cache(maxsize=1)
 def _reranker() -> TextCrossEncoder:
     # Lazy + cached: the ~1.1 GB model downloads on first use, not on import.
-    return TextCrossEncoder(model_name=settings.rerank_model)
+    return TextCrossEncoder(model_name=settings.rerank_model, threads=settings.ort_threads)
 
 
 def warm() -> None:
-    """Eagerly load + cache the cross-encoder. Call once at server startup so the
-    lru_cache cold-start can't race across FastAPI's sync-endpoint threadpool workers
-    (otherwise concurrent first requests could each load the 1.1 GB model)."""
-    _reranker()
+    """Eagerly load AND run one inference. Call once at server startup so the first real
+    request pays neither the model load nor ONNX Runtime's first-run graph optimization
+    (the big one), and so the lru_cache cold-start can't race across FastAPI's threadpool."""
+    list(_reranker().rerank("warm", ["warming the cross-encoder graph"]))
 
 
 def rerank_search(conn, query: str, k: int = 5,

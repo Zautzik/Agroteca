@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # multilingual cross-encoder; only runs on the small hybrid candidate pool.
     rerank_model: str = "jinaai/jina-reranker-v2-base-multilingual"
     rerank_candidates: int = 20   # how many hybrid results to re-score
+    ort_threads: int | None = None  # ONNX intra-op threads for embed+rerank; None = all cores, lower to bound concurrency
 
     # --- generation (LLM) ---
     # Local Ollama by default; deploy swaps to a hosted/smaller model by setting
