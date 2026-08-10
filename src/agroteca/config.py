@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # AGROTECA_GEN_MODEL / AGROTECA_GEN_BASE_URL — no source edits (7 min on CPU is unservable).
     gen_model: str = "qwen2.5:3b"
     gen_base_url: str = "http://localhost:11434"   # Ollama host
-    gen_timeout: float = 120.0                     # seconds; a hung model must not hang the stream
+    gen_timeout: float = 300.0                     # read timeout (s): generous for slow CPU first-token; a hosted model can lower it
     gen_num_predict: int = 1024                    # cap output tokens (runaway-generation guard)
 
     # --- chunking ---

@@ -1,16 +1,19 @@
 import json
 import time
 
+import httpx
 from ollama import Client
 
 from agroteca.config import settings
 from agroteca.ingest import store
 from agroteca.retrieve.rerank import rerank_search, rerank_scored
 
-# One reusable client: pins the Ollama host and a read timeout so a hung or slow model
-# surfaces an error instead of hanging the stream forever. Model + host are config knobs,
-# so a deploy swaps to a hosted/smaller model via env vars rather than editing source.
-_client = Client(host=settings.gen_base_url, timeout=settings.gen_timeout)
+# One reusable client. Short connect timeout (if Ollama is down, fail fast) but a generous
+# read timeout, because CPU prompt-eval can take a while to reach the first token; a truly
+# hung model still errors after gen_timeout instead of hanging forever. Model + host are
+# config knobs, so a deploy swaps to a hosted/smaller model via env vars, not source edits.
+_client = Client(host=settings.gen_base_url,
+                 timeout=httpx.Timeout(settings.gen_timeout, connect=10.0))
 _GEN_OPTS = {"num_predict": settings.gen_num_predict}
 
 SYSTEM_PROMPT = """You are an agronomy assistant. Answer the QUESTION using ONLY the CONTEXT chunks provided.
