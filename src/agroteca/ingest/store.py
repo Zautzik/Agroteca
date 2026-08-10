@@ -6,14 +6,34 @@ Phase 3's hybrid lexical search matches exact tokens consistently across ES+EN.
 """
 import psycopg
 from pgvector.psycopg import register_vector
+from psycopg_pool import ConnectionPool
 
 from agroteca.config import settings
 
+# TCP keepalives so idle connections survive Docker Desktop's WSL2 port-forward, which
+# resets idle localhost connections (the 10053 abort seen during long cross-encoder gaps).
+KEEPALIVE = {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 5}
+
 
 def connect() -> psycopg.Connection:
-    conn = psycopg.connect(settings.db_url)
+    """One-shot connection for CLI / ingest / eval scripts. The served API uses make_pool()."""
+    conn = psycopg.connect(settings.db_url, **KEEPALIVE)
     register_vector(conn)
     return conn
+
+
+def make_pool(min_size: int = 1, max_size: int | None = None) -> ConnectionPool:
+    """A connection pool for the served API: reuses connections instead of a fresh TCP
+    handshake + auth per request. `configure` runs register_vector on each pooled
+    connection so pgvector round-trips still work."""
+    return ConnectionPool(
+        settings.db_url,
+        min_size=min_size,
+        max_size=max_size or settings.db_pool_max,
+        kwargs=KEEPALIVE,
+        configure=register_vector,
+        open=False,
+    )
 
 
 def upsert_document(conn: psycopg.Connection, doc: dict) -> None:

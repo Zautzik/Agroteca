@@ -84,11 +84,12 @@ def _tiers_for(conn, chunk_ids):
     return {cid: tier for cid, tier in rows}
 
 
-def answer_ndjson(conn, question: str, k: int = 5):
-    """Stream NDJSON frames the UI can render as evidence:
-      {"type":"meta", "sources":[{source,tier,score,snippet}...], "retrieval_ms":N}
-      {"type":"token","text":"..."}  (many)
-      {"type":"done","generation_ms":N}
+def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
+    """DB phase (needs a connection): retrieve + score + tier lookup. Returns
+    (meta_line, context) so the caller can RELEASE the DB connection before the long,
+    DB-free generation stream — a pooled connection must not idle through CPU generation.
+
+      meta_line -> {"type":"meta","sources":[{source,tier,score,snippet}...],"retrieval_ms":N}
     """
     t0 = time.perf_counter()
     rows = rerank_scored(conn, question, k=k)
@@ -100,9 +101,13 @@ def answer_ndjson(conn, question: str, k: int = 5):
          "score": round(sc, 3), "snippet": text.strip()[:240]}
         for (cid, sf, text, sc) in rows
     ]
-    yield json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms}) + "\n"
-
+    meta_line = json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms}) + "\n"
     context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows])
+    return meta_line, context
+
+
+def stream_ndjson(question: str, context: str):
+    """Generation phase (no DB connection held): yield token frames, then a done frame."""
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
     g0 = time.perf_counter()
     stream = _client.chat(
@@ -119,6 +124,15 @@ def answer_ndjson(conn, question: str, k: int = 5):
         if piece:
             yield json.dumps({"type": "token", "text": piece}) + "\n"
     yield json.dumps({"type": "done", "generation_ms": int((time.perf_counter() - g0) * 1000)}) + "\n"
+
+
+def answer_ndjson(conn, question: str, k: int = 5):
+    """Backward-compatible one-shot: prepare (DB) then stream (generation) in one call.
+    The served API calls prepare_ndjson + stream_ndjson directly so it can return the
+    pooled connection to the pool between the two phases."""
+    meta_line, context = prepare_ndjson(conn, question, k=k)
+    yield meta_line
+    yield from stream_ndjson(question, context)
 
 
 if __name__ == "__main__":

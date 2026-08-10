@@ -9,10 +9,15 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agroteca.config import settings
-from agroteca.generate import answer_ndjson
+from agroteca.generate import prepare_ndjson, stream_ndjson
 from agroteca.ingest import store
 from agroteca.ingest.embed import embed_query
 from agroteca.retrieve.rerank import warm as warm_reranker
+
+# A pooled DB connection for the served API — reused across requests instead of a fresh
+# TCP handshake + auth per question. Opened in the lifespan, below.
+pool = store.make_pool()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,7 +26,10 @@ async def lifespan(app: FastAPI):
     # lru_cache(maxsize=1) cold-start and load the 1.1 GB reranker several times over.
     warm_reranker()          # load + cache the cross-encoder
     embed_query("warm")      # load + cache the embedder
+    pool.open()
+    pool.wait()              # block until the pool has a live connection ready
     yield
+    pool.close()
 
 
 app = FastAPI(title="Agroteca", lifespan=lifespan)
@@ -53,13 +61,10 @@ def health():
 @app.get("/stats")
 def stats():
     """Cheap corpus stats for the UI ribbon (no model, one round-trip)."""
-    conn = store.connect()
-    try:
+    with pool.connection() as conn:
         chunks = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
         docs = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
         tiers = conn.execute("SELECT count(DISTINCT tier) FROM chunks").fetchone()[0]
-    finally:
-        conn.close()
     return {"chunks": chunks, "documents": docs, "tiers": tiers}
 
 
@@ -87,15 +92,14 @@ def manifest():
 
 @app.post("/ask/stream")
 def ask_stream(payload: Question):
-    """Stream the answer as NDJSON: meta (sources + scores + tiers + timing),
-    then token frames, then a done frame (generation timing)."""
-    conn = store.connect()
+    """Stream the answer as NDJSON: meta (sources + scores + tiers + timing), then token
+    frames, then a done frame. The pooled connection is held only for retrieval, then
+    returned to the pool BEFORE the (connection-free) generation stream."""
+    with pool.connection() as conn:
+        meta_line, context = prepare_ndjson(conn, payload.question)
 
     def gen():
-        try:
-            for line in answer_ndjson(conn, payload.question):
-                yield line
-        finally:
-            conn.close()
+        yield meta_line
+        yield from stream_ndjson(payload.question, context)
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")

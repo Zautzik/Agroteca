@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # --- database ---
     # host port 5433 to avoid colliding with an existing Postgres (e.g. Langfuse) on 5432
     db_url: str = "postgresql://postgres:agroteca@localhost:5433/agroteca"
+    db_pool_max: int = 8   # served-API pool ceiling (each streamed request holds a conn only for retrieval)
 
     # --- embedding model ---
     # Baseline: MiniLM-L12 multilingual (384-dim). MEASURED ~50x faster on CPU than
