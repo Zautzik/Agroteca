@@ -2,7 +2,7 @@
 
 **An eval-first, bilingual (ES/EN) Retrieval-Augmented Generation system over agricultural documents — built measurement-first, with a governed, provenance-aware corpus.**
 
-> **Status: Phases 1–7 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** with a retrieval-transparency drawer. Only public deployment remains.
+> **Status: Phases 1–8 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** → a **production-hardened serving layer** (config-driven models, a health-checked connection pool, input guardrails, page-precise citations, a startup warm-up that cut the first request from >90 s to 27 s) — all verified against a live running server. The one step left is the public URL, a hosting-cost decision rather than a code problem.
 >
 > **The number that matters:** retrieval@5 **0.35 (dense) → 0.45 (hybrid) → 0.75 (reranked)** — every step measured against a golden set built *before* the retriever existed (20 answerable questions).
 
@@ -14,10 +14,11 @@
 
 - **Eval-first, and it earned its keep.** The 22-question golden set was written *before* the retriever, so every change is measured, not guessed — and it once flagged a "hallucination" that turned out to be a **mislabeled ground-truth answer** (I fixed the label, not the model).
 - **A measured retrieval cascade.** dense → hybrid (Reciprocal Rank Fusion) → cross-encoder reranking, each stage's gain proven on the golden set: **retrieval@5 0.35 → 0.45 → 0.75**, six questions fixed with **zero regressions**.
-- **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources, and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
+- **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources **to the page** (`Book.pdf, p. 37`), and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
 - **A transparency-first web app.** A bilingual, streaming UI where every answer opens a drawer exposing the exact retrieved chunks, their cross-encoder relevance scores, and governance tiers — plus a retrieval-vs-generation latency breakdown. *Show your work.*
 - **Provenance as a first-class concern.** A four-tier governed corpus (open / local-only / synthetic / distractor) where the tier controls where a document may appear; copyrighted material is confined to a local-only mode and never shipped publicly.
-- **Local-first, measured model choices.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput and quality — not by hype.
+- **Local-first, measured model choices.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput and quality — not by hype (the heavier e5-large is a benchmarked **50× slower** on CPU: ~7 h vs ~8 min to re-index).
+- **Hardened by actually running it.** Standing the server up surfaced — and fixed — the bugs no offline test shows: a DB connection that died idle behind Docker's proxy, a timeout that strangled slow-but-correct answers, and an ONNX cold-start that made the first request 3× slower. Config-driven models, a health-checked connection pool, input guardrails, and a startup warm-up now stand between "runs on my laptop" and "serves strangers."
 
 ---
 
@@ -131,6 +132,28 @@ uv run uvicorn agroteca.api:app --reload
 
 ---
 
+## From prototype to service — production hardening
+
+A demo that runs on my laptop and a service a stranger can hit are different objects. Closing that gap meant **standing the server up and running it** — the only way to surface the failures that never appear in a unit test. Each of these was found by reading a real traceback, fixed, and re-verified against the running server:
+
+- **Config-driven models.** The LLM, its host, timeouts, pool size, and ONNX thread count are settings, not code — a deploy swaps the slow local model for a fast hosted one with an env var. *This is the single change that makes the app deployable at all.*
+- **A health-checked connection pool.** The database is reached through a `psycopg` pool that reuses connections and **validates each one on checkout** — after a live run `500`'d on a connection Docker's proxy had silently killed while idle. The stream path releases its pooled connection *before* the minutes-long generation, so a streamed answer never holds the pool hostage.
+- **Guardrails on the public surface.** Bounded input length (a 1 MB "question" can't reach the FTS regex / `tsquery`), `Literal`-validated feedback, and both models **warmed at startup** so concurrent first requests can't each load the 1.1 GB reranker.
+- **A timeout that tells slow from broken.** Fail fast if Ollama is unreachable (10 s connect), but stay patient with legitimately slow CPU generation — a flat timeout punishes the honest slow answer.
+- **Page-precise citations.** The page was already stored per chunk; surfacing it turns `(Book.pdf)` into `(Book.pdf, p. 37)` — verifiable in one click.
+- **A warm-up that made the first request 3× faster.** The first query took **>90 s**, every one after ~25 s: the reranker paid ONNX Runtime's one-time graph optimization on its first *real* inference. Moving that to startup dropped first-request retrieval to **27 s**, measured on the live server.
+
+```bash
+# deploy path — same code, a hosted model, only the open corpus:
+AGROTECA_GEN_BASE_URL=https://your-llm-host  AGROTECA_GEN_MODEL=<fast-model> \
+  uv run uvicorn agroteca.api:app --host 0.0.0.0 --port 8000
+# LOCAL_MODE stays off → the copyrighted tier is never served publicly
+```
+
+The loop that produced all of this — run, break, diagnose, fix, re-run — is the difference between a portfolio piece and a product.
+
+---
+
 ## Roadmap
 
 | Phase | Deliverable | Ship criterion | Status |
@@ -142,7 +165,8 @@ uv run uvicorn agroteca.api:app --reload
 | 5 | Grounded, **cited**, **abstaining** generation (local LLM) | answers are cited; no-answer questions abstain | ✅ **done** |
 | 6 | Serving: FastAPI + token streaming (NDJSON evidence stream) | a request streams a cited answer end-to-end | ✅ **done** |
 | 7 | Web app: bilingual streaming UI + retrieval-transparency drawer | grounded/cited answer *or* honest abstention, evidence one click away | ✅ **done** |
-| 8 | Public deployment + write-up | a stranger opens a URL and gets a cited answer | ⏳ planned |
+| 8 | Production hardening: config-driven models · pooled + health-checked DB · input guardrails · startup warm-up | verified against a live running server | ✅ **done** |
+| 9 | Public URL + write-up | a stranger opens a URL and gets a cited answer | ⏳ a hosting-cost decision |
 
 ---
 
@@ -155,6 +179,7 @@ uv run uvicorn agroteca.api:app --reload
 | **Hybrid + Reciprocal Rank Fusion** | dense search misses exact codes (`WL-323`); lexical search misses paraphrase; fusing by *rank* (not score) sidesteps the incomparable score scales |
 | **Cross-encoder reranker** | reads each (query, chunk) pair *together* to sharpen the top candidates before the LLM — retrieval quality is the ceiling on answer quality |
 | **Local LLM · ground / cite / abstain** | grounded generation with citations and a canonical abstention phrase; rules live in the **system** role to resist prompt injection from retrieved chunks; a local 3B model keeps inference free, offline, and copyrighted chunks on-device |
+| **Config-driven serving** | the model, host, timeouts, pool size, and ONNX thread count are settings, not code — a deploy points at a hosted GPU model (or bounds concurrency) with an env var, no source edit |
 | **Deterministic eval, RAGAS-ready** | deterministic `must_contain` / retrieval@k checks run cheaply and gate every change; semantic faithfulness (RAGAS) is the documented next layer |
 
 ---

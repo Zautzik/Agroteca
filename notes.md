@@ -1,6 +1,6 @@
 # I Wrote the Final Exam Before I Built the Student
 
-> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app. The through-line: *measure before you build, distrust your own metrics, show your work, and know when to say "I don't know."*
+> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic — the bugs you only find by *running* it. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," and run it before you believe it.*
 
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
@@ -212,3 +212,55 @@ Three posts ago I wrote a final exam before I built a student. Two posts ago the
 The interesting part was never the line count. It was the judgment: measure before you build, distrust your own metrics, show your work, and know when to say "I don't know." A system that does those four things is trustworthy. A person who does them is worth hiring.
 
 That was always the point.
+
+---
+
+# It Broke the Moment I Ran It
+
+### Notes from building an eval-first agricultural RAG — Part 4: the gap between "runs on my laptop" and "serves strangers"
+
+I ended Part 3 with a comfortable line: deploying was "a dollar-sign problem, not a code problem." I was half right, and the wrong half is the interesting one.
+
+The dollar sign is real — a seven-minute CPU model on a public server is a bill, not a bug. But "deployable" is more than latency. It's whether the thing survives contact with real traffic: a connection that goes stale, an input that's hostile, a first request that lands before the machinery is warm. I had never actually *run* my system as a server and watched it get hit. So I did — and it broke in three ways, none of which any test I'd written would ever have shown me.
+
+## War story #4: the connection that died while nobody was looking
+
+My API opened a fresh database connection on every request. Fine for a script; wrong for a service — a new handshake and auth per question is waste you pay on every click. So I did the grown-up thing and added a connection *pool*: a handful of connections kept open and reused.
+
+Then I stood the server up, warmed it, and asked a question. The stats endpoint returned **500**. The log said `connection abort` — on a query that had worked seconds earlier.
+
+Here's what happened: the pooled connection sat *idle* during startup, and Docker's networking proxy silently severs idle connections — so the pool handed my request a corpse. The fix is the pool feature nobody demos: **check the connection before you hand it out.** Validate with a `SELECT 1` on checkout; discard and replace a dead one. One setting, and the 500 vanished. The lesson outlives Docker: **a served app must assume its resources go stale between requests.** Freshness isn't the default — it's something you enforce.
+
+## War story #5: the timeout that strangled the patient
+
+To stop a hung model from hanging the stream forever, I'd added a timeout. Sensible. I set it to two minutes.
+
+Then generation started timing out — on *correct* answers. On a CPU, my model legitimately takes minutes to produce its first token, and my "catch a hang" timer couldn't tell "wedged" from "thinking hard." It executed the patient along with the corpse.
+
+The fix was to stop asking one number to answer two different questions. **Fail fast if the model is *unreachable* — ten seconds to connect — but be patient if it's merely *slow*.** A timeout that can't distinguish broken from slow will always punish the honest, slow answer. In a system whose entire brand is honesty, that's the one failure mode you can't ship.
+
+## War story #6: the first customer who paid everyone's setup bill
+
+The first question I asked the live server took **over ninety seconds**. The second took twenty-five. The third, twenty-five. Something was billing the first visitor for the whole shop's setup.
+
+It was the reranker. I "warmed" it at startup — or thought I did. My warm-up *loaded* the model but never *ran* it, and ONNX Runtime does a one-time graph optimization on its first real inference. So the first unlucky request paid that cost, live, while it waited.
+
+The fix was almost funny in its obviousness: warm up by actually running one inference, not just loading the weights. First-request retrieval dropped from **>90 seconds to 27** — measured on the running server. **Warm the machines before you open the doors — and make sure "warm" means *ran*, not *loaded*.**
+
+## The unglamorous rest
+
+There was quieter work in the same spirit — the plumbing that separates a script from a service. The model name had been hardcoded in three places; I moved it, along with its host, timeouts, pool size, and thread count, into config, so a deploy can point at a fast hosted model with an environment variable instead of a code edit. I bounded the public inputs, so a one-megabyte "question" can't sail into a regex. And I made the sources cite to the *page* — the number was already sitting in the database, it had just never been asked for. `(Libro_INIA_04.pdf)` became `(Libro_INIA_04.pdf, p. 37)`, and a citation you can turn to beats one you have to trust.
+
+## The lesson under all three
+
+Notice what every one of these shares: **I could not have found them by reading the code.** They're emergent — they exist only when a real client hits a real server with real timing. Idle connections don't die in a unit test. Cold-start doesn't show up in a function call. The timeout looked correct until a slow answer met it.
+
+The gap between "runs on my machine" and "serves strangers" is *exactly* this class of bug, and the only tool that crosses it is the least glamorous one in the box: **stand the thing up and hit it.** Run, break, read the traceback, fix, run again — until the server takes a hostile input, a slow answer, and a cold start without flinching. Then write down every number.
+
+## The arc, one more time
+
+Four posts ago I wrote an exam before the student existed. The student sat it, climbed from 0.35 to 0.75 one measured step at a time, and caught its own examiner in a lie. Then it learned to stream, to show its work, to say "I don't know" out loud. And in this post it finally faced a stranger — and I found out what "finished" actually costs.
+
+The judgments were the point all along: measure before you build, distrust your own metrics, show your work, know when to say "I don't know" — and, the one this post earned, **run it before you believe it.** The first four make a system trustworthy. The fifth is what makes it *real*.
+
+A person who does all five is worth hiring. That was always the point.
