@@ -25,6 +25,10 @@ Measured on **CPU** — the free/local build — via `eval/compare_retrievers.py
   hosted endpoint; (2) shrink the candidate pool (`settings.rerank_candidates`, currently 20);
   (3) offer a **"fast mode"** returning the hybrid top-k without reranking — p95 ≤ 250 ms at the
   0.45-vs-0.75 answer@5 trade-off the [retrieval table](results.csv) quantifies.
+- **Startup warm-up matters.** The server runs a real rerank inference at startup, so the
+  first request pays neither the model load nor ONNX Runtime's first-run graph optimization —
+  which otherwise added ~60 s+ to an unwarmed first `/ask/stream` (measured on the live server:
+  >90 s → **27 s** first-request retrieval). The p50 above is the steady-state number.
 
 ## Query-embed latency (from `eval/bench_embed.py`)
 
