@@ -150,6 +150,8 @@ AGROTECA_GEN_BASE_URL=https://your-llm-host  AGROTECA_GEN_MODEL=<fast-model> \
 # LOCAL_MODE stays off → the copyrighted tier is never served publicly
 ```
 
+> Full recipe — env vars, the generation swap (Ollama-compatible host = env var; another provider = a small localized change), and ops notes — in **[`DEPLOY.md`](DEPLOY.md)**.
+
 The loop that produced all of this — run, break, diagnose, fix, re-run — is the difference between a portfolio piece and a product.
 
 ---
