@@ -1,9 +1,17 @@
 import json
 import time
 
-import ollama
+from ollama import Client
+
+from agroteca.config import settings
 from agroteca.ingest import store
 from agroteca.retrieve.rerank import rerank_search, rerank_scored
+
+# One reusable client: pins the Ollama host and a read timeout so a hung or slow model
+# surfaces an error instead of hanging the stream forever. Model + host are config knobs,
+# so a deploy swaps to a hosted/smaller model via env vars rather than editing source.
+_client = Client(host=settings.gen_base_url, timeout=settings.gen_timeout)
+_GEN_OPTS = {"num_predict": settings.gen_num_predict}
 
 SYSTEM_PROMPT = """You are an agronomy assistant. Answer the QUESTION using ONLY the CONTEXT chunks provided.
 
@@ -30,12 +38,13 @@ def format_context(rows) -> str:
 
 def ask_ollama(system: str, user: str) -> str:
     """Send a system+user prompt to the local model, return its text reply."""
-    resp = ollama.chat(
-        model="qwen2.5:3b",
+    resp = _client.chat(
+        model=settings.gen_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        options=_GEN_OPTS,
     )
     return resp["message"]["content"]
 
@@ -52,13 +61,14 @@ def answer_stream(conn, question: str, k: int = 5):
     rows = rerank_search(conn, question, k=k)              # retrieval (the pre-token wait)
     context = format_context(rows)
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
-    stream = ollama.chat(
-        model="qwen2.5:3b",
+    stream = _client.chat(
+        model=settings.gen_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user},
         ],
         stream=True,                                       # <- Ollama now yields chunks, not one blob
+        options=_GEN_OPTS,
     )
     for chunk in stream:
         yield chunk["message"]["content"]                  # <- hand over each token as it arrives
@@ -95,13 +105,14 @@ def answer_ndjson(conn, question: str, k: int = 5):
     context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows])
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
     g0 = time.perf_counter()
-    stream = ollama.chat(
-        model="qwen2.5:3b",
+    stream = _client.chat(
+        model=settings.gen_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user},
         ],
         stream=True,
+        options=_GEN_OPTS,
     )
     for chunk in stream:
         piece = chunk["message"]["content"]

@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     rerank_model: str = "jinaai/jina-reranker-v2-base-multilingual"
     rerank_candidates: int = 20   # how many hybrid results to re-score
 
+    # --- generation (LLM) ---
+    # Local Ollama by default; deploy swaps to a hosted/smaller model by setting
+    # AGROTECA_GEN_MODEL / AGROTECA_GEN_BASE_URL — no source edits (7 min on CPU is unservable).
+    gen_model: str = "qwen2.5:3b"
+    gen_base_url: str = "http://localhost:11434"   # Ollama host
+    gen_timeout: float = 120.0                     # seconds; a hung model must not hang the stream
+    gen_num_predict: int = 1024                    # cap output tokens (runaway-generation guard)
+
     # --- chunking ---
     chunk_tokens: int = 512
     chunk_overlap: int = 64
