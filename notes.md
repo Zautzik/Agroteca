@@ -127,6 +127,8 @@ The finish line was a **cross-encoder**. A normal embedding model judges the que
 
 That step took retrieval@5 from 0.45 to **0.75**. It fixed six questions the earlier stages had missed, and broke *zero*. Pure gain.
 
+And it hid a bigger win than the headline showed. `answer@5` only asks whether the answer landed *somewhere* in the top five. When I later measured `answer@1` — was it the *very first* result? — the reranker leapt from **0.15 to 0.75**, and MRR from **0.25 to 0.75**. It doesn't just *fetch* the answer, it *puts it on top*: whenever the answer is in the pool, the cross-encoder pins it to rank 1. The metric I'd been celebrating was blind to the reranker's best trick — a reminder that a metric hides as much as it reveals, and you should measure the thing your component actually does. (A sharp aside fell out of the same table: hybrid's `answer@1` is *lower* than plain dense's, 0.15 vs 0.30 — equal-weight fusion had been shoving the true answer out of the top slot to buy pool recall. Yet more evidence hybrid was never the finish line.)
+
 And it handed me the cleanest lesson in measurement discipline of the whole build. When I eyeballed a single reranked query, the top result looked like *garbage* — a weeds table, a title page, a bibliography. If I'd trusted my eyes I'd have declared the reranker broken and ripped it out. But the aggregate over the answerable set said 0.75. **Trust the ruler, not the vibe.** One query is an anecdote; the golden set is evidence.
 
 ## The model I didn't use

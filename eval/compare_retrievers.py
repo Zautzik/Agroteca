@@ -1,19 +1,19 @@
 """Retriever comparison on the golden set: dense vs lexical vs hybrid vs rerank.
 
-Same dual metric as the Phase-2 baseline (answer-chunk + document), so numbers are
-directly comparable to results/baseline.md. Prints what each stage fixed.
+Metrics come from eval/_scoring.py (the single definition), so this reproduces the same
+answer@k / document@k the Phase-2 baseline reported and adds the ranking-quality metrics
+(answer@1, MRR) that expose the reordering a reranker performs but answer@k cannot see.
 
     uv run python eval/compare_retrievers.py --k 5
     uv run python eval/compare_retrievers.py --k 5 --open-only   # deploy corpus only (drops copyrighted 'local')
     uv run python eval/compare_retrievers.py --k 5 --latency     # + per-stage p50/p95 retrieval latency
 """
 import argparse
-import json
-import re
 import statistics
 import sys
 import time
 
+from _scoring import load_answerable, score
 from agroteca.config import settings
 from agroteca.ingest import store
 from agroteca.retrieve.dense import dense_search
@@ -27,33 +27,9 @@ GOLDEN = settings.root / "eval" / "golden_set.jsonl"
 DEPLOY_TIERS = ["open", "synthetic"]
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip().lower()
-
-
-def load_answerable() -> list[dict]:
-    out = []
-    for line in GOLDEN.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            q = json.loads(line)
-            if q.get("answerable", True) and q.get("must_contain"):
-                out.append(q)
-    return out
-
-
-def score(rows_fn, questions, k):
-    ans = doc = 0
-    misses = []
-    for q in questions:
-        rows = rows_fn(q["question"], k)
-        mc = _norm(q["must_contain"])
-        a = any(sf == q["source_file"] and mc in _norm(t) for _cid, sf, t in rows)
-        d = any(sf == q["source_file"] for _cid, sf, t in rows)
-        ans += a
-        doc += d
-        if not a:
-            misses.append(q["id"])
-    return ans, doc, misses
+def _sf_text(rows):
+    """Retrievers return (chunk_id, source_file, text); the metrics need only (source_file, text)."""
+    return [(sf, text) for _cid, sf, text in rows]
 
 
 def latency_pass(methods, questions):
@@ -61,7 +37,7 @@ def latency_pass(methods, questions):
     print(f"\n=== retrieval latency over {len(questions)} questions (ms) ===")
     print(f"{'method':8}  {'p50':>7}  {'p95':>7}  {'mean':>7}  {'max':>7}")
     for name, fn in methods.items():
-        fn(questions[0]["question"], 5)  # warmup: exclude one-time lazy model load from timing
+        fn(questions[0]["question"], 5)  # warmup: exclude the one-time lazy model load from timing
         ts = []
         for q in questions:
             s = time.perf_counter()
@@ -74,30 +50,40 @@ def latency_pass(methods, questions):
 
 
 def main(k, open_only, do_latency):
-    conn = store.connect()
-    qs = load_answerable()
+    pool = store.make_pool()
+    pool.open()
+    qs = load_answerable(GOLDEN)
     n = len(qs)
     tiers = DEPLOY_TIERS if open_only else None
+
+    def run(search, query, kk, **kw):
+        # A fresh pooled connection per call. The pool validates it on checkout, so a
+        # connection the Docker proxy dropped during the reranker's long CPU-only gaps is
+        # replaced transparently instead of failing the pass mid-run.
+        with pool.connection() as conn:
+            return _sf_text(search(conn, query, kk, tiers=tiers, **kw))
+
     methods = {
-        "dense":   lambda query, kk: dense_search(conn, query, kk, tiers),
-        "lexical": lambda query, kk: lexical_search(conn, query, kk, tiers),
-        "hybrid":  lambda query, kk: hybrid_search(conn, query, kk, n=60, tiers=tiers),
-        "rerank":  lambda query, kk: rerank_search(conn, query, kk, tiers=tiers),
+        "dense":   lambda q, kk: run(dense_search, q, kk),
+        "lexical": lambda q, kk: run(lexical_search, q, kk),
+        "hybrid":  lambda q, kk: run(hybrid_search, q, kk, n=60),
+        "rerank":  lambda q, kk: run(rerank_search, q, kk),
     }
 
     scope = (f"OPEN-ONLY deploy corpus ({'+'.join(DEPLOY_TIERS)}, no 'local')"
              if open_only else "FULL index (incl. copyrighted 'local')")
+    a_k, a_1, d_k, m_k = f"answer@{k}", "answer@1", f"document@{k}", f"mrr@{k}"
     print(f"\n=== retrieval@{k} over {n} answerable questions — {scope} ===")
-    print(f"{'method':8}  {'answer-chunk':16}  {'document':12}")
+    print(f"{'method':8}  {a_k:>9}  {a_1:>9}  {d_k:>11}  {m_k:>7}")
     results = {}
     for name, fn in methods.items():
-        a, d, miss = score(fn, qs, k)
-        results[name] = (a, d, miss)
-        print(f"{name:8}  {f'{a}/{n} = {a/n:.2f}':16}  {f'{d}/{n} = {d/n:.2f}':12}")
+        r = score(qs, fn, k)
+        results[name] = r
+        print(f"{name:8}  {r[a_k]:>9.2f}  {r[a_1]:>9.2f}  {r[d_k]:>11.2f}  {r[m_k]:>7.2f}")
 
-    dmiss = set(results["dense"][2])
-    hmiss = set(results["hybrid"][2])
-    rmiss = set(results["rerank"][2])
+    dmiss = set(results["dense"]["misses"])
+    hmiss = set(results["hybrid"]["misses"])
+    rmiss = set(results["rerank"]["misses"])
     print(f"\nhybrid FIXED over dense:    {sorted(dmiss - hmiss) or '-'}")
     print(f"rerank FIXED over hybrid:   {sorted(hmiss - rmiss) or '-'}")
     print(f"rerank regressed vs hybrid: {sorted(rmiss - hmiss) or '-'}")
@@ -105,7 +91,7 @@ def main(k, open_only, do_latency):
 
     if do_latency:
         latency_pass(methods, qs)
-    conn.close()
+    pool.close()
 
 
 if __name__ == "__main__":

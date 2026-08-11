@@ -91,13 +91,15 @@ uv run python eval/validate_golden.py
 
 Measured on the answerable golden set (k=5), one variable at a time:
 
-| Stage | answer-chunk@5 | document@5 |
-|---|---|---|
-| Dense (semantic baseline) | 0.35 | 0.65 |
-| + Lexical, fused with RRF (hybrid) | 0.45 | 0.65 |
-| **+ Cross-encoder reranking** | **0.75** | **0.90** |
+| Stage | answer@5 | answer@1 | document@5 | MRR@5 |
+|---|---|---|---|---|
+| Dense (semantic baseline) | 0.35 | 0.30 | 0.65 | 0.33 |
+| + Lexical, fused with RRF (hybrid) | 0.45 | 0.15 | 0.65 | 0.25 |
+| **+ Cross-encoder reranking** | **0.75** | **0.75** | **0.90** | **0.75** |
 
-Reranking fixed **six** questions the earlier stages missed, with **zero regressions**. On generation, the system **abstains on the corpus's genuinely unanswerable questions** rather than fabricating, and a **3B local model matched a 7B on abstention at ~3× lower latency** — chosen by measurement, not assumption.
+Reranking fixed **six** questions the earlier stages missed, with **zero regressions** — but the sharper story is the ordering columns. `answer@5` only measures membership; **`answer@1` and MRR@5 leap `0.15 → 0.75` and `0.25 → 0.75`**, because whenever the answer is in the pool the reranker **pins it to rank 1**. (Hybrid's `answer@1` *dips below* dense's 0.30 — equal-weight RRF buys pool recall at the cost of top-1 precision, exactly what reranking repairs.)
+
+On generation, the system **abstains on the corpus's genuinely unanswerable questions** rather than fabricating, and a **3B local model matched a 7B on abstention at ~3× lower latency** — chosen by measurement, not assumption.
 
 > An honest footnote (because honesty is the brand): lexical search *alone* scored 0.50 at answer@5 vs the 0.45 hybrid — but that's a **single question** at n=20, within noise. The evidence that actually matters is `doc@5`: **0.85 lexical vs 0.65 hybrid, a four-document gap** — equal-weight RRF was diluting the stronger retriever's recall. That's why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
 
