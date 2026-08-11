@@ -203,6 +203,10 @@ Somewhere this became a real product — dark mode, two languages, shareable lin
 
 Thirty features is exactly how a beautiful app becomes an ugly one. The rule I held: **the empty screen stays a calm search box.** Everything else lives one gesture away — behind a drawer, a hover, a keystroke, a toggle. Calm by default, powerful on demand. An employer should see elegance first and *discover* the depth, which is far more convincing than being handed a dashboard.
 
+## The look, or: let the type do the work
+
+The last pass is the one people notice first and mention last — the visual design — and the temptation there is to *decorate*. I resisted. Instead I built a small design system: two themes defined as one set of perceptual **OKLCH** tokens — a moonlit dark and a daylight-forest light, swapped by a single toggle — and then let *typography* do the persuading. A serif for the wordmark, a humanist sans for the interface, and a monospace face reserved for exactly one job: every number and identifier the system reports — latency, relevance scores, the page in a citation, the governance tier on a badge. When the data wears mono and the prose wears a book face, a reader feels *precision* before they've parsed a word. That's the whole trick — premium isn't ornament, it's a hierarchy of type that quietly tells you what to trust. And because it's a token layer over the existing markup, none of it touched a line of the streaming, the drawer, or the logic underneath.
+
 ## The honest footnote on "deploy"
 
 Could a stranger open a URL right now? Almost. The one thing between here and there is that the app carries a local model, a database, and a seven-minute CPU chew — a delight to run on my own machine and an expense to run on a public server that strangers hit. A live URL wants a GPU, a smaller model, or patience the internet doesn't have. That's a deployment decision with a dollar sign on it, not a code problem — and I'd rather name it honestly than pretend the latency isn't real.

@@ -120,7 +120,8 @@ A local model on CPU is slow (~minutes per answer), so the front end is built to
 - **Radical transparency** — every answer carries a one-click **"Sources & retrieval"** drawer: the exact chunks it grounded on, each with a governance-tier badge, a cross-encoder relevance bar, and a snippet — plus a retrieval-vs-generation latency breakdown. *The answer isn't magic; here's the evidence.*
 - **Honest by design** — when the corpus can't answer, the card becomes a distinct **empty-basket** state, never a fabricated guess.
 - **Bilingual** — a leaf ES/EN toggle localizes the whole UI (and the example questions); the model already answers in the question's language.
-- **Product touches** — light/dark themes, shareable `?q=` links, session history, keyboard shortcuts, a live health dot, a corpus-stats ribbon, live tokens/sec, a real Stop button, copy/export, and 👍/👎 feedback logged server-side.
+- **Product touches** — shareable `?q=` links, session history, keyboard shortcuts, a live health dot, a corpus-stats ribbon, live tokens/sec, a real Stop button, copy/export, and 👍/👎 feedback logged server-side.
+- **Designed, not decorated.** A token-driven design system with two OKLCH themes — moonlit *Clair de Lune* (dark) and daylight *Forest* (light), swapped by a single toggle — and a deliberate typographic hierarchy: a serif wordmark, a humanist-sans UI, and a monospace face reserved for every *data* surface (latency, relevance scores, page citations, tier badges). It reads premium because the typography carries the weight, not ornament — and it degrades gracefully to system fonts offline, with hex fallbacks for pre-OKLCH browsers.
 
 The default view stays a calm search box — all of that power reveals only on demand.
 
