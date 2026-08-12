@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     gen_num_predict: int = 1024                    # cap output tokens (runaway-generation guard)
 
     # --- chunking ---
+    # KNOWN CEILING: the MiniLM embedder truncates at ~128 tokens (max_seq_length), so the
+    # dense vector encodes only the first ~128 tokens of each 512-token chunk -- the tail is
+    # present for lexical FTS and the reranker's text, but not in the semantic vector.
+    # Confirmed with a cosine test (chunks sharing their first ~128 tokens but with different
+    # tails embed identically, cosine 1.0). A documented cap on dense recall; the fix is a
+    # longer-context embedder (e5-large 512 / BGE-M3 8192) or smaller chunks -- a measured
+    # re-index experiment, not a hot patch, since it re-runs the whole eval.
     chunk_tokens: int = 512
     chunk_overlap: int = 64
     chars_per_token: int = 4            # rough heuristic for char-based splitting
