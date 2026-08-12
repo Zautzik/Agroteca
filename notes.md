@@ -191,6 +191,8 @@ Click "Sources & retrieval" and it unfolds — the exact chunks the answer was b
 
 The answer isn't magic. Here's the evidence. Check my work.
 
+![An Agroteca answer with its evidence drawer open — each source shown with a governance-tier badge, a cross-encoder relevance score, a page-level citation, a snippet, and a weak-match flag.](docs/img/hero-drawer.jpg)
+
 That's not a gimmick — it's the whole thesis of the project made visible. A grounded RAG that *shows* its grounding is a fundamentally more trustworthy object than one that merely asserts.
 
 ## The empty basket

@@ -131,7 +131,26 @@ uv run uvicorn agroteca.api:app --reload
 # then open http://127.0.0.1:8000  ·  auto-generated API docs at /docs
 ```
 
-> _Screenshots / a short demo GIF go here — the fastest way to convey the UI to someone skimming the repo._
+### Screenshots
+
+<p align="center">
+  <img src="docs/img/hero-drawer.jpg" alt="An Agroteca answer with its Sources & retrieval drawer open: every retrieved chunk shows a governance-tier badge, a cross-encoder relevance score, a page-level citation, and a snippet, alongside a low-confidence flag and a retrieval-vs-generation latency split." width="100%">
+</p>
+
+> **Every answer is a receipt.** The drawer exposes the exact chunks it grounded on — each with a governance-tier badge, a cross-encoder relevance score, a **page-level citation**, and a snippet — plus an honest *weak-match* flag when the top score is low, and a breakdown of where the time went. *Show your work.*
+
+<p align="center">
+  <img src="docs/img/dark.jpg" alt="Agroteca in its moonlit Clair de Lune dark theme, streaming a page-cited answer." width="49%">
+  <img src="docs/img/light.jpg" alt="Agroteca in its daylight Forest light theme." width="49%">
+</p>
+
+> **One app, two themes** — moonlit **Clair de Lune** (dark) and daylight **Forest** (light), a single toggle apart; the data surfaces stay in a monospace face in both.
+
+<p align="center">
+  <img src="docs/img/abstain.jpg" alt="Agroteca's empty-basket abstention state for an out-of-corpus question." width="66%">
+</p>
+
+> When the corpus genuinely can't answer, an honest **empty basket** — never a fabrication.
 
 ---
 
