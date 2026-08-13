@@ -1,0 +1,33 @@
+# Keep the build context small and secret-free. The Dockerfile COPYs explicitly (never
+# `COPY . .`), so this is defence-in-depth: even a stray secret or the copyrighted tier
+# can't be pulled into a layer by accident.
+
+.git
+.github
+.venv
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+build/
+dist/
+wheels/
+
+# secrets / local env
+.env
+.env.*
+
+# the copyrighted `local` tier -- must never enter an image
+data/raw/
+
+# local-only feedback log, eval outputs, screenshots, scratch, practice scripts
+feedback.jsonl
+results/
+docs/img/
+*.zip
+practice_*.py
+scratch*/
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store

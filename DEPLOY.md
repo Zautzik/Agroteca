@@ -6,10 +6,13 @@ changes.** The one real decision is *where generation runs* (see [Generation](#g
 
 ## What a public deploy serves
 
-Only the **open + synthetic** tiers. The copyrighted `local` tier is never ingested when
-`LOCAL_MODE` is off, so a public server physically cannot contain it. On that corpus the final
-cascade scores **0.65 answer@5 / 0.75 doc@5** (vs 0.75 / 0.90 on the full local index) — the
-honest number a stranger gets. See the `deploy` row in [`eval/results.csv`](eval/results.csv).
+Only the **open + synthetic** tiers — **7,246 chunks across 60 documents**. The copyrighted
+`local` tier (3,084 chunks) is never ingested when `LOCAL_MODE` is off, so a public server
+*physically* cannot contain it — and the [`Dockerfile`](Dockerfile) reinforces that at the
+image layer: it COPYs `data/synthetic` but never `data/raw`, so the tier can't ride along even
+by accident. On that corpus the final cascade scores **0.65 answer@5 / 0.75 doc@5** (vs
+0.75 / 0.90 on the full local index) — the honest number a stranger gets. See the `deploy` row
+in [`eval/results.csv`](eval/results.csv).
 
 ## Configuration (all via `AGROTECA_` env vars)
 
@@ -44,7 +47,43 @@ The embedder and cross-encoder reranker run **in-process** (fastembed / ONNX). C
 (reranker ~25 s/query — the free-tier tax); pass a CUDA provider / `cuda=True` on a GPU box, or
 use a hosted reranker, to make retrieval sub-second. See [`results/latency.md`](results/latency.md).
 
-## Steps
+## Ship it as a container (recommended)
+
+The [`Dockerfile`](Dockerfile) is a two-stage build: a `uv sync --frozen` off the committed
+`uv.lock` (reproducible dep tree, dependency layer cached independently of source), then a
+slim non-root runtime with a `/health` healthcheck and a warm-up-aware start period. One image
+serves the API *and*, with an override command, runs the ingest — same code, same corpus rules.
+
+```bash
+docker build -t agroteca .
+
+# One-shot ingest into your managed Postgres (LOCAL_MODE is already 0 in the image).
+docker run --rm \
+  -e AGROTECA_DB_URL="postgresql://user:pass@host:5432/agroteca" \
+  agroteca python -m agroteca.ingest.run
+
+# Serve. The volume caches the ~1.5 GB of models so a restart doesn't re-download them.
+docker run -d --name agroteca -p 8000:8000 \
+  -e AGROTECA_DB_URL="postgresql://user:pass@host:5432/agroteca" \
+  -e AGROTECA_GEN_BASE_URL="https://your-ollama-host" \
+  -e AGROTECA_GEN_MODEL="<fast-model>" \
+  -e AGROTECA_GEN_TIMEOUT=60 \
+  -v agroteca-models:/app/.cache \
+  agroteca
+```
+
+First boot is slow on purpose — it downloads both models, then *runs* them once so the first
+real request is fast (>90 s → 27 s). `docker inspect --format '{{.State.Health.Status}}'
+agroteca` reports `healthy` only after `Application startup complete`; put a reverse proxy
+(Caddy / nginx) in front for TLS and don't expose 8000 directly.
+
+**Baking the models in.** The image downloads models at runtime to stay lean (~590 MB;
+the ~1.5 GB of models live in the cache volume) and let one cache volume serve many restarts. For an immutable or offline deploy, pre-pull them at
+build time instead: add a stage that runs a single `warm_reranker()` + `embed_query()` with
+`HF_HOME`/`FASTEMBED_CACHE_PATH` set to a build dir, then `COPY` that cache into the runtime
+stage. Trades a ~1.5 GB fatter image for a cold start with no network dependency.
+
+## Or run from source
 
 ```bash
 # 1. Postgres + pgvector (managed, or the bundled compose on a VM)
