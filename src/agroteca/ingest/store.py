@@ -57,6 +57,15 @@ def wipe_chunks(conn: psycopg.Connection, doc_id: str) -> None:
     conn.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
 
 
+def doc_is_ingested(conn: psycopg.Connection, doc_id: str) -> bool:
+    """True if this document already has chunks. Each doc's wipe+insert commits atomically,
+    so a doc is all-or-nothing — which makes this a sound resume check: skip the done docs and
+    a long re-index can run in small, restartable batches instead of one uninterrupted pass."""
+    return conn.execute(
+        "SELECT 1 FROM chunks WHERE doc_id = %s LIMIT 1", (doc_id,)
+    ).fetchone() is not None
+
+
 def insert_chunks(conn: psycopg.Connection, rows: list[dict]) -> None:
     """Bulk-insert chunk rows. The tsv keyword index uses the language-agnostic
     'simple' config so hybrid lexical search matches exact tokens across ES+EN."""

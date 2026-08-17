@@ -4,9 +4,14 @@ Which tiers load is governed by config (LOCAL_MODE / include_distractor), so the
 deploy build literally cannot ingest the copyrighted tier.
 
 Usage:
-    uv run python -m agroteca.ingest.run                 # ingest configured tiers
-    uv run python -m agroteca.ingest.run --limit 2       # smoke test: first 2 docs
+    uv run python -m agroteca.ingest.run                    # ingest configured tiers
+    uv run python -m agroteca.ingest.run --limit 2          # smoke test: first 2 docs
+    uv run python -m agroteca.ingest.run --resume           # skip done docs (crash-safe re-run)
+    uv run python -m agroteca.ingest.run --resume --limit 5 # do the next 5 pending docs, then stop
     AGROTECA_LOCAL_MODE=1 uv run python -m agroteca.ingest.run
+
+A doc's wipe+insert commits atomically, so --resume can rebuild a long index in small,
+restartable batches: run a few docs, stop, let the machine sleep, resume later.
 """
 import argparse
 import csv
@@ -82,19 +87,24 @@ def page_of(offset: int, spans) -> int | None:
     return spans[-1][2] if spans else None
 
 
-def ingest(limit: int | None = None) -> None:
+def ingest(limit: int | None = None, resume: bool = False) -> None:
     conn = store.connect()
     tiers = settings.tiers()
-    print(f"tiers: {tiers} | model: {settings.embed_model} | chunk~{settings.chunk_tokens}tok")
-    docs = chunks_total = skipped = 0
+    print(f"tiers: {tiers} | model: {settings.embed_model} | chunk~{settings.chunk_tokens}tok"
+          + (f" | resume: skip done, batch<= {limit}" if resume else ""))
+    docs = chunks_total = skipped = skipped_done = 0
 
     rows = [r for tier in tiers for r in load_rows(tier)]
-    if limit:
-        rows = rows[:limit]
 
     for row in rows:
-        path = source_path(row)
+        if limit and docs >= limit:      # batch cap counts only NEWLY ingested docs (post-skip)
+            break
         name = row["filename"]
+        did = doc_id_for(name)
+        if resume and store.doc_is_ingested(conn, did):
+            skipped_done += 1
+            continue
+        path = source_path(row)
         if not path.exists():
             print(f"[missing] {name}")
             continue
@@ -106,7 +116,6 @@ def ingest(limit: int | None = None) -> None:
 
         pieces = chunk_document(full, settings.chunk_chars, settings.overlap_chars)
         embeddings = embed_passages([c.text for c in pieces])
-        did = doc_id_for(name)
 
         store.wipe_chunks(conn, did)
         store.upsert_document(conn, {
@@ -129,12 +138,16 @@ def ingest(limit: int | None = None) -> None:
         print(f"[ok] {name[:52]:52} tier={row['_tier']:9} chunks={len(chunk_rows)}")
 
     conn.close()
-    print(f"\n=== ingested {docs} docs, {chunks_total} chunks; skipped {skipped} (no text) ===")
+    tail = f", {skipped_done} (already done)" if resume else ""
+    print(f"\n=== ingested {docs} docs, {chunks_total} chunks; skipped {skipped} (no text){tail} ===")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--limit", type=int, default=None,
+                    help="ingest at most N documents this run (small, restartable batches)")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip documents already ingested — resume a long re-index in batches")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    ingest(limit=args.limit)
+    ingest(limit=args.limit, resume=args.resume)
