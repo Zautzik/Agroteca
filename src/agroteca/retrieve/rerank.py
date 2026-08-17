@@ -58,3 +58,30 @@ def rerank_scored(conn, query: str, k: int = 5,
     scores = list(_reranker().rerank(query, texts))
     ranked = sorted(zip(pool, scores), key=lambda p: p[1], reverse=True)
     return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]
+
+
+def rerank_scored_bilingual(conn, query: str, translated: str, k: int = 5,
+                            candidates: int | None = None, tiers: list[str] | None = None):
+    """Bilingual variant of rerank_scored: union the hybrid pools of the original and the
+    translated query, then re-score by the MAX cross-encoder score over both — so an English
+    answer chunk earns its score from the English query member, a Spanish chunk from the Spanish
+    one. `translated` is passed IN (this stays LLM-free; the caller owns translation), so the eval
+    path never depends on the LLM. Measured to recover a cross-lingual miss no embedder swap could
+    (eval/query_translation.py). Returns [(chunk_id, source_file, text, score), ...].
+    """
+    candidates = candidates or settings.rerank_candidates
+    seen, pool = set(), []
+    for row in (hybrid_search(conn, query, k=candidates, tiers=tiers)
+                + hybrid_search(conn, translated, k=candidates, tiers=tiers)):
+        if row[0] not in seen:                    # dedupe by chunk_id, keep first occurrence
+            seen.add(row[0]); pool.append(row)
+    if not pool:
+        return []
+    texts = [row[2] for row in pool]
+    best = [float("-inf")] * len(texts)
+    for q in (query, translated):
+        for i, s in enumerate(_reranker().rerank(q, texts)):
+            if s > best[i]:
+                best[i] = s
+    ranked = sorted(zip(pool, best), key=lambda p: p[1], reverse=True)
+    return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]

@@ -6,7 +6,8 @@ from ollama import Client
 
 from agroteca.config import settings
 from agroteca.ingest import store
-from agroteca.retrieve.rerank import rerank_search, rerank_scored
+from agroteca.retrieve.rerank import rerank_scored, rerank_scored_bilingual, rerank_search
+from agroteca.retrieve.translate import translate_query
 
 # One reusable client. Short connect timeout (if Ollama is down, fail fast) but a generous
 # read timeout, because CPU prompt-eval can take a while to reach the first token; a truly
@@ -102,7 +103,14 @@ def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
       meta_line -> {"type":"meta","sources":[{source,tier,score,snippet}...],"retrieval_ms":N}
     """
     t0 = time.perf_counter()
-    rows = rerank_scored(conn, question, k=k)
+    # Bilingual retrieval when enabled: translate the question and rerank the union pool by max
+    # score, so a Spanish question can reach an English answer chunk. Fails soft -- translate_query
+    # returns None on any error, and we fall back to the original-only cascade.
+    translated = translate_query(question) if settings.translate_queries else None
+    if translated:
+        rows = rerank_scored_bilingual(conn, question, translated, k=k)
+    else:
+        rows = rerank_scored(conn, question, k=k)
     meta = _meta_for(conn, [r[0] for r in rows])
     retrieval_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -111,7 +119,8 @@ def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
          "score": round(sc, 3), "snippet": text.strip()[:240]}
         for (cid, sf, text, sc) in rows
     ]
-    meta_line = json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms}) + "\n"
+    meta_line = json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms,
+                            "translated_query": translated}) + "\n"
     pages = {cid: meta.get(cid, ("?", None))[1] for (cid, sf, text, sc) in rows}
     context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows], pages)
     return meta_line, context

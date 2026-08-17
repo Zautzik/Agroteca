@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     gen_timeout: float = 300.0                     # read timeout (s): generous for slow CPU first-token; a hosted model can lower it
     gen_num_predict: int = 1024                    # cap output tokens (runaway-generation guard)
 
+    # --- query translation (serving-side cross-lingual lever) ---
+    # Retrieve in a BILINGUAL query space: translate the question to the other language and rerank
+    # the union pool by max cross-encoder score. MEASURED to recover a cross-lingual miss (q08,
+    # rank None->1) that no embedder swap could -- answer@5 0.75->0.80, zero regressions
+    # (eval/query_translation.py). Fails soft to original-only retrieval, so it can never do worse
+    # than the baseline. Costs one LLM translation call per query (the app already runs an LLM).
+    translate_queries: bool = True
+    translate_timeout: float = 60.0
+
     # --- chunking ---
     # KNOWN CEILING: the MiniLM embedder truncates at ~128 tokens (max_seq_length), so the
     # dense vector encodes only the first ~128 tokens of each 512-token chunk -- the tail is
