@@ -5,6 +5,8 @@
 > **Status: Phases 1–8 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** → a **production-hardened serving layer** (config-driven models, a health-checked connection pool, input guardrails, page-precise citations, a startup warm-up that cut the first request from >90 s to 27 s) — all verified against a live running server. The one step left is the public URL, a hosting-cost decision rather than a code problem.
 >
 > **The number that matters:** retrieval@5 **0.35 (dense) → 0.45 (hybrid) → 0.75 (reranked)** — every step measured against a golden set built *before* the retriever existed (20 answerable questions).
+>
+> **Beyond the build:** the app is **containerized** (a two-stage `uv` image, non-root, health-checked) over **idempotent, resumable ingestion** — and I ran the embedder upgrade as a **complete controlled experiment**, a full e5-large re-index that *disproved my own hypothesis* and taught me more than a green metric would have (see [Design decisions](#design-decisions-and-why)).
 
 **Stack:** Python · FastAPI · Postgres + pgvector · full-text search · fastembed (ONNX) · a multilingual cross-encoder reranker · Ollama (local LLM) · `uv` · Docker · a self-contained streaming web front end.
 
@@ -17,7 +19,7 @@
 - **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources **to the page** (`Book.pdf, p. 37`), and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
 - **A transparency-first web app.** A bilingual, streaming UI where every answer opens a drawer exposing the exact retrieved chunks, their cross-encoder relevance scores, and governance tiers — plus a retrieval-vs-generation latency breakdown. *Show your work.*
 - **Provenance as a first-class concern.** A four-tier governed corpus (open / local-only / synthetic / distractor) where the tier controls where a document may appear; copyrighted material is confined to a local-only mode and never shipped publicly.
-- **Local-first, measured model choices.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput and quality — not by hype (the heavier e5-large is a benchmarked **50× slower** on CPU: ~7 h vs ~8 min to re-index).
+- **Local-first, measured model choices — and I *ran the experiment*.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput, not hype (e5-large is a benchmarked 50× slower on CPU). When the embedder looked like the bottleneck I didn't guess — I ran the upgrade end-to-end: a controlled cosine pilot, a cheap re-chunk probe, then a full **e5-large re-index**. It **doubled dense retrieval** (0.35 → 0.75) yet barely moved the final number — because the reranker was already *masking* the weak dense — and it **disproved my prediction** that it would fix the cross-lingual misses. I kept the fast model and documented why. *The finding was the value, not the swap.*
 - **Hardened by actually running it.** Standing the server up surfaced — and fixed — the bugs no offline test shows: a DB connection that died idle behind Docker's proxy, a timeout that strangled slow-but-correct answers, and an ONNX cold-start that made the first request 3× slower. Config-driven models, a health-checked connection pool, input guardrails, and a startup warm-up now stand between "runs on my laptop" and "serves strangers."
 
 ---
@@ -164,6 +166,7 @@ A demo that runs on my laptop and a service a stranger can hit are different obj
 - **A timeout that tells slow from broken.** Fail fast if Ollama is unreachable (10 s connect), but stay patient with legitimately slow CPU generation — a flat timeout punishes the honest slow answer.
 - **Page-precise citations.** The page was already stored per chunk; surfacing it turns `(Book.pdf)` into `(Book.pdf, p. 37)` — verifiable in one click.
 - **A warm-up that made the first request 3× faster.** The first query took **>90 s**, every one after ~25 s: the reranker paid ONNX Runtime's one-time graph optimization on its first *real* inference. Moving that to startup dropped first-request retrieval to **27 s**, measured on the live server.
+- **Containerized, and governance-safe by construction.** A two-stage `uv` Docker build — a dependency layer cached off the committed lockfile, a slim **non-root** runtime, a `/health` healthcheck, models in a cache volume — ships the whole app in one **590 MB** image that both **serves *and* ingests**. The copyrighted tier *physically cannot ship*: the Dockerfile never `COPY`s `data/raw`, so governance holds at the image boundary, not just in config. Ingestion is **idempotent and resumable** (`--resume`), so a multi-hour re-index survives an interruption instead of restarting from zero.
 
 ```bash
 # deploy path — same code, a hosted model, only the open corpus:
@@ -198,7 +201,7 @@ The loop that produced all of this — run, break, diagnose, fix, re-run — is 
 
 | Choice | Rationale |
 |---|---|
-| **Multilingual MiniLM embeddings** (measured) | cross-lingual questions rule out an English-only model; MiniLM-384 was chosen over e5-large / BGE-M3 by **measured** CPU throughput — with the heavier models documented as an upgrade path |
+| **Multilingual MiniLM embeddings** (measured, then *stress-tested*) | cross-lingual questions rule out an English-only model; MiniLM-384 was chosen over e5-large by **measured** CPU throughput (50× faster) — then I **ran the e5-large upgrade end-to-end**: it doubled *dense* recall, but the reranker had been masking that, so the final barely moved. I kept MiniLM and recorded the tradeoff rather than pay 8× query latency + a `VECTOR(1024)` migration for a noise-level gain |
 | **Postgres + pgvector** | metadata filtering, keyword search, and vector search in one store; production-credible; tiers enforced in SQL |
 | **Hybrid + Reciprocal Rank Fusion** | dense search misses exact codes (`WL-323`); lexical search misses paraphrase; fusing by *rank* (not score) sidesteps the incomparable score scales |
 | **Cross-encoder reranker** | reads each (query, chunk) pair *together* to sharpen the top candidates before the LLM — retrieval quality is the ceiling on answer quality |
@@ -228,6 +231,8 @@ src/agroteca/
   static/index.html       # the self-contained bilingual streaming web app
 stream_client.py          # tiny terminal client for the streaming endpoint
 migrations/               # pgvector + full-text schema
+Dockerfile .dockerignore  # two-stage uv build; one non-root image serves + ingests
+DEPLOY.md                 # deploy recipe: hosted-model swap, LOCAL_MODE, container run
 docs/                     # ingestion spec + teaching notes
 results/                  # measured before/after for each phase
 DATA_GOVERNANCE.md        # the four-tier provenance/licensing policy

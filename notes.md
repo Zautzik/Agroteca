@@ -1,6 +1,6 @@
 # I Wrote the Final Exam Before I Built the Student
 
-> **The 60-second version.** A three-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus (with war stories); **Part 2** builds the measured retrieval + generation engine; **Part 3** turns it into a streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic — the bugs you only find by *running* it. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," and run it before you believe it.*
+> **The 60-second version.** A five-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus; **Part 2** the measured retrieval + generation engine; **Part 3** the streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic; **Part 5** runs the embedder upgrade as a controlled experiment — and lets it *disprove my own hypothesis*. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it — and run the experiment that can prove you wrong.*
 
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
@@ -133,9 +133,9 @@ And it handed me the cleanest lesson in measurement discipline of the whole buil
 
 ## The model I didn't use
 
-A quick word on the embedding model, because it's a decision I'm proud of *not* getting wrong. I'd planned to use BGE-M3 — the fashionable multilingual choice, and it's genuinely good. Then I timed it on my actual hardware: about 1.2 chunks per second on CPU, which for this corpus is roughly "come back tomorrow." I tried e5-large (still slow), then a MiniLM model at 384 dimensions — and it was the sweet spot: fast enough to iterate, good enough to score well.
+A quick word on the embedding model, because it's a decision I'm proud of *not* getting wrong. I'd planned to reach for a heavy multilingual model — the fashionable choice, and genuinely good. Then I timed the candidates on my actual hardware with a benchmark, not a vibe: e5-large managed about **0.4 chunks per second** on CPU — "come back in seven hours" for this corpus — while a **MiniLM at 384 dimensions did 20.6**, fifty times faster, fast enough to iterate and good enough to score well. I shipped the one the stopwatch chose.
 
-The heavier models are still in my README, labeled honestly as an upgrade path. But the working system runs on the one I picked with a *stopwatch*, not a hype cycle.
+But "documented upgrade path" turned out to be a promise I'd keep. In **Part 5** I *ran* the e5-large upgrade end to end — a full re-index and a controlled experiment — and the result was far more interesting than the swap itself. Foreshadowing is cheap; the measurement is in Part 5.
 
 ## Teaching it to say "I don't know"
 
@@ -272,3 +272,51 @@ Four posts ago I wrote an exam before the student existed. The student sat it, c
 The judgments were the point all along: measure before you build, distrust your own metrics, show your work, know when to say "I don't know" — and, the one this post earned, **run it before you believe it.** The first four make a system trustworthy. The fifth is what makes it *real*.
 
 A person who does all five is worth hiring. That was always the point.
+
+---
+
+# The Upgrade That Disproved Me
+
+### Notes from building an eval-first agricultural RAG — Part 5: running the experiment that can prove you wrong
+
+Four posts in, the system worked and the number was honest: 0.75. But an honest number invites the question a senior engineer always asks next — *where's the ceiling, and what's the next lever?* The tempting answer sat in my own README: swap the fast little MiniLM embedder for e5-large, the heavyweight everyone reaches for. Bigger model, better retrieval, higher number. Obvious.
+
+Obvious is exactly the trap. "Swap in the bigger model and call it an upgrade" is a guess wearing a lab coat. So instead of a swap, I ran an **experiment** — designed, like the golden set, to be able to *disprove me*.
+
+## The catch that started it
+
+First I had to earn the hypothesis. Chunking at 512 tokens, I'd quietly assumed the embedder *read* all 512. It doesn't. MiniLM truncates at ~128 tokens — everything past that is dropped before the model ever computes on it. I caught it with a two-line test: take two chunks that share their first 128 tokens but have *completely different* tails — one about tilapia, one about astrophysics — and embed both. If the model reads the whole chunk, the vectors differ. They came back **identical. Cosine 1.0000.** The tail — often exactly where the answer lived — was invisible to the dense vector.
+
+Then I quantified the blast radius instead of hand-waving it: **half my golden answers had their answer text sitting past that 128-token window**, and four of them were precisely the questions the reranker still missed. Now I had a real hypothesis: a longer-context embedder should recover them.
+
+## Cheapest decisive test first
+
+A full re-index with a 50×-slower model is seven hours of CPU. You don't spend seven hours to test a hypothesis you can probe in seven minutes. So I staged it.
+
+**The pilot (minutes).** A controlled A/B on the cosine itself: for each answer chunk, how much does the *tail* — the part past 128 tokens — move the question-to-chunk similarity? Under MiniLM the answer was **+0.001** — many chunks *exactly* zero, because chopping tokens it never encoded is a no-op. That flat zero is the *control*: proof, not assertion, that MiniLM is blind to the tail. Under e5-large the same tail moved the score **+0.030**, positive on every blind chunk. e5 reads what MiniLM can't — confirmed without touching the seven-hour job.
+
+**The cheap probe (thirty minutes).** Before spending on a new model, I tested the *other* fix for truncation: just make the chunks smaller — 128 tokens, so nothing gets cut — with the same MiniLM. The result was a gift, because it was counterintuitive. Document-level recall went *up* (the model could finally see the answer), but the final reranked answer@5 went **down**, 0.75 → 0.60. Smaller chunks meant 4.4× more of them, diluting the exact answer chunk and starving the reranker of context. **Chunk size isn't a bug to fix; it's a tradeoff — and 512 was already near the sweet spot.** The obvious fix made the product worse, and only the measurement said so.
+
+**The real thing (seven hours, survivable).** Then e5-large, full re-index, at 512 tokens. One more piece of engineering earned its keep here: I'd made ingestion *resumable* — each document commits atomically, so a `--resume` flag skips finished work. Which mattered, because midway the machine slept and killed the job. Before, that's seven hours gone; now it was a shrug — resume, and it picked up exactly where it stopped. *Design the long job to survive interruption before you start it.*
+
+## The result I didn't predict
+
+The headline moved a little: 0.75 → 0.80. One question on a set of twenty — honestly, within noise. A junior reports "+0.05, upgrade successful" and swaps the model. But the truth wasn't in the final row; it was one layer down.
+
+e5's **dense retrieval doubled** — answer@5 from 0.35 to 0.75. Not noise: a forty-point swing. So why did the *final* number barely move? Because the cross-encoder reranker had been quietly **compensating** for MiniLM's weak dense all along. Give the reranker a strong retriever and it has less rescuing to do; the two effects cancel at the finish line. **The better embedder didn't raise the ceiling — it relocated the work from the expensive reranker into cheap dense search.** That's worth more than the +0.05: it means you could *shrink or drop* the reranker and keep the accuracy. You only see it if you read the per-stage rows instead of the headline.
+
+And the part I'm proudest of, because it cost me my hypothesis: **I predicted e5 would fix the cross-lingual misses** — the Spanish questions whose answer phrase is English. It didn't. All three survived the upgrade; e5 recovered a *different*, same-language question instead. So those misses were never an embedder problem. They're a cross-lingual *alignment* problem, and no bigger vector model touches them — the fix lives on the query side, in translation, which is now my *measured* next lever instead of a guess.
+
+## The decision, and why it's the senior one
+
+So I kept the fast MiniLM shipped. e5 doubles dense recall, but the reranker already captures most of that at the finish, and e5 costs 8× the query latency plus a schema migration — a real bill for a noise-level final gain. I wrote the whole thing down: the doubling, the masking, the falsified prediction, the tradeoff.
+
+That's the move I want a reviewer to notice. Not "he swapped in a bigger model and the number went up," but: *he ran the upgrade as an experiment that could prove him wrong, it did, and he read the real story under a flat metric — then made the boring, correct call and documented why.* A green number flatters you; a disproven hypothesis teaches you. I'll take the lesson.
+
+## The arc, complete
+
+Five posts ago I wrote an exam before the student existed. The student sat it and climbed 0.35 → 0.75, caught its own examiner in a lie, learned to stream and to say "I don't know," and survived its first strangers. In this one it did the most grown-up thing of all: it tested its own best idea — hard enough to find out the idea was half wrong — and was better for knowing.
+
+The judgments were always the point: measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it — and, the one this post earned, **run the experiment that can prove you wrong.** The first five make a system trustworthy. The sixth is what makes an engineer.
+
+That was always the point.
