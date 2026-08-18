@@ -72,7 +72,10 @@ class Settings(BaseSettings):
     # re-index experiment, not a hot patch, since it re-runs the whole eval.
     chunk_tokens: int = 512
     chunk_overlap: int = 64
-    chars_per_token: int = 4            # rough heuristic for char-based splitting
+    chars_per_token: int = 4            # rough, English-biased heuristic for char-based splitting;
+                                        # ES prose and cultivar codes tokenize differently, so a
+                                        # "512-token" chunk may be ~400-600 real tokens. Spot-check
+                                        # against a new embedder's max_seq_length before trusting it.
 
     # --- which tiers to ingest ---
     local_mode: bool = False           # False = deploy (open+synthetic); True adds copyrighted 'local'

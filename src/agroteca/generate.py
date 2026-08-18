@@ -27,6 +27,20 @@ RULES:
    Never invent an answer. Never bend this rule to please the user.
 4. Answer in the same language as the QUESTION."""
 
+# The canonical abstention line rule 3 mandates. Abstention is a *measurable* metric only because
+# this string is exact and machine-detectable -- keep the detector, the eval, and the UI agreeing
+# on one phrase. `is_abstention` is deliberately lenient on case/whitespace but not on wording.
+ABSTAIN_PHRASE = "No encuentro la respuesta en el contexto disponible."
+_ABSTAIN_NEEDLE = "no encuentro la respuesta en el contexto disponible"
+
+
+def is_abstention(text: str) -> bool:
+    """True iff the reply is the canonical abstention line (case- and whitespace-insensitive).
+
+    A near-miss ('No tengo la respuesta') must NOT count, or 'the model abstained' becomes a vibe
+    instead of a metric."""
+    return _ABSTAIN_NEEDLE in " ".join(text.split()).lower()
+
 
 def _cite(source_file: str, page) -> str:
     """Source label for a chunk — with the page number when we have it (verifiable citations)."""
