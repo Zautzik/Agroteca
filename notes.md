@@ -1,6 +1,6 @@
 # I Wrote the Final Exam Before I Built the Student
 
-> **The 60-second version.** A five-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus; **Part 2** the measured retrieval + generation engine; **Part 3** the streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic; **Part 5** runs the embedder upgrade as a controlled experiment — and lets it *disprove my own hypothesis*. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it — and run the experiment that can prove you wrong.*
+> **The 60-second version.** A six-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus; **Part 2** the measured retrieval + generation engine; **Part 3** the streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic; **Part 5** runs the embedder upgrade as a controlled experiment — and lets it *disprove my own hypothesis*; **Part 6** rebuilds serving for real concurrency and GPU inference, then spends a day chasing a 20× slowdown that turns out not to be the bug anyone — including me — first assumed. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong — and read the source before you rewrite it.*
 
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
@@ -318,5 +318,53 @@ That's the move I want a reviewer to notice. Not "he swapped in a bigger model a
 Five posts ago I wrote an exam before the student existed. The student sat it and climbed 0.35 → 0.75, caught its own examiner in a lie, learned to stream and to say "I don't know," and survived its first strangers. In this one it did the most grown-up thing of all: it tested its own best idea — hard enough to find out the idea was half wrong — and was better for knowing.
 
 The judgments were always the point: measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it — and, the one this post earned, **run the experiment that can prove you wrong.** The first five make a system trustworthy. The sixth is what makes an engineer.
+
+That was always the point.
+
+---
+
+# The GPU I Didn't Have
+
+### Notes from building an eval-first agricultural RAG — Part 6: chasing a 20× slowdown that wasn't the bug I thought it was
+
+Five posts in, the retrieval number was proven and the service was hardened. Then two things happened on the same day: the serving layer got rebuilt for real concurrency, and the inference backend got rebuilt for GPU. Both were good, deliberate changes. Both also taught me that "good, deliberate change" and "free" are different claims — and that the second lesson only surfaces if you actually measure the thing you just built, instead of shipping it on faith the way I refused to let myself do back in Part 1.
+
+## The concurrency rebuild, and a bug that was really a keyboard
+
+The database layer had been opening one connection at a time, which is fine for a script and wrong for a service — the same lesson as Part 4's idle-connection bug, one layer deeper. The fix was `psycopg_pool.AsyncConnectionPool`: a pool that hands out connections without blocking a thread, wired into FastAPI's dependency-injection system so a route never touches the pool object directly — it just asks for a connection and gets one, the same way it asks for a validated request body.
+
+Standing it up on Windows surfaced something I hadn't budgeted for: `asyncio`'s default event loop on Windows (`ProactorEventLoop`) **cannot run the async database driver at all.** Not slow — structurally incompatible, a documented limitation of the C extension underneath it. I found this the honest way: I ran the server, it hung, and I chased the hang until psycopg's own error message told me exactly what was wrong and exactly which loop to use instead. The fix was a platform-specific event-loop policy. The lesson was smaller and more useful than the fix: **a feature that works on your CI's Linux box and never gets run on your own Windows laptop is a feature you haven't actually tested** — and I only caught it because I insist on running the thing, not just reading the diff.
+
+## The pivot, and the honest ledger
+
+Then came a bigger decision: move the embedder and reranker off a CPU-only ONNX backend and onto real `torch`/CUDA inference — GPU-resident models, warmed at startup, with a fail-fast guard so a misconfigured deployment refuses to start rather than silently serving on the CPU it thinks it has a GPU for. I raised the obvious tension before writing a line of it: this repo's whole free-tier pitch had been "runs anywhere, CPU included." A GPU-only serving path breaks that pitch on my own laptop, which has no GPU at all.
+
+I made the trade deliberately and then wrote down what it cost, the same discipline as the e5 experiment in Part 5: gained real GPU inference, a fail-fast startup guarantee, and an immutable, network-independent container image. Lost: the free CPU path as a *default* (still available, now opt-in), a heavier dependency tree, and — the one I'd flag hardest in a review — `trust_remote_code=True` on the reranker's model load, which executes code from the model's own repository. I pinned it to a reviewed commit hash rather than "latest," because a supply-chain surface you can name and pin is a manageable risk, and one you wave past isn't.
+
+## The slowdown, and the hypothesis I was wrong about
+
+Here's the part I'd tell in an interview.
+
+After the pivot, a single rerank call — the exact operation that used to take about 25 seconds on CPU — started taking minutes. Sometimes it didn't return inside a 10-minute timeout at all. My first, entirely reasonable hypothesis: **thread oversubscription.** `asyncio.to_thread` pulls from a pool of up to sixteen-ish worker threads, and PyTorch's CPU backend initializes its own internal thread pool the first time it runs on a given OS thread. Different requests landing on different worker threads could mean a dozen-plus competing thread pools fighting over twelve physical cores. It's a real, documented failure mode. I built the fix — a single dedicated worker thread for every torch call, so the model's thread pool initializes exactly once — and reran the test.
+
+**Still slow.** Not a little slow. Five hundred seconds slow, on a call that used to take ten.
+
+This is the moment that mattered, and it's the one I want on record: **a plausible-sounding hypothesis that produces a plausible-sounding fix is not the same as a confirmed diagnosis.** I had a story that explained the symptom, a fix that matched the story, and I still checked, because the fix didn't move the number. So instead of shipping the threading fix and calling it solved, I went and read the actual, cached source code of the reranker model — the real implementation, not my mental model of it — and found that its batching logic was already correct: it tokenizes the whole candidate pool together and runs one forward pass, exactly the "fix" I'd have written if the story had been right. There was nothing there to fix. My hypothesis was wrong, and the honest move was to say so, not to ship a patch that felt like an answer.
+
+The real cause, once I stopped guessing and started isolating variables: my own benchmark had been lying to me. I'd been timing the reranker against short synthetic test strings — a dozen words each — and gotten a fast, reassuring number. The live system reranks full document chunks, several hundred words long. I reran the identical, unthreaded, single-call benchmark against real chunk text pulled straight from the database, and the fast number vanished: **the same code, the same machine, five hundred seconds — because I'd finally fed it what it actually processes in production.** The gap wasn't a bug in my code or a hole in my threading model. It was the honest cost of eager-mode inference on unoptimized weights, doing real work on real-length input, versus the old backend's quantized, graph-optimized ONNX runtime doing the same job with a decade of CPU-inference optimization behind it. Batching was never broken. My test data was.
+
+(There's a smaller, funnier postscript to this story: partway through the investigation my laptop went to sleep overnight while I was waiting on a background process, and every number I collected for the next hour was contaminated by a corrupted network connection that had survived the suspend cycle looking alive. I burned real time chasing a "hang" that was actually a dead socket before I noticed the wall clock had jumped sixteen hours. **Check your environment's assumptions before you re-trust your last measurement** — a machine that slept is not the same machine you started debugging on.)
+
+## What I actually shipped instead
+
+Not a fake fix. Three real, smaller things: the single-worker-thread executor (a legitimate hardening against a *real*, if not the primary, failure mode), an `AGROTECA_DEVICE=auto` mode so the exact same code runs CPU-locally at zero cost and GPU in production without an env-var contradiction with the fail-fast guarantee I'd built the week before, and — because I'd been asked to prove the fix with a benchmark — a dedicated `eval/eval_pipeline.py`: a concurrent, HTTP-level harness that fires the golden set at a live `/retrieve` endpoint (a new, retrieval-only route, split out specifically so an eval never pays for a multi-minute LLM generation it doesn't need) and reports p50/p95 latency and retrieval accuracy in one Markdown table. Running it end-to-end was itself instructive: it correctly reported a real request timeout as a scored failure instead of crashing the whole run — the harness did its job even when the system under test didn't.
+
+I also caught myself before writing a lie into public documentation. Asked to write a README claiming the system was reproducible via a single `docker compose up`, I checked first — and the compose file only ever stood up the database. The app had no compose wiring at all. Rather than write the sentence and hope nobody tried it, I wired the app into the compose file for real, validated the config, and only then wrote the sentence. **A claim in a README is a promise a stranger will test.** Write the promise after you've made it true, not before.
+
+## The arc, extended
+
+Six posts in now. The student sat an exam it hadn't taken yet, climbed 0.35 to 0.75, caught its own examiner in a lie, learned to stream and to say "I don't know," survived its first strangers, and tested its best idea hard enough to find out the idea was half wrong. This post it got faster hardware and slower answers at the same time, chased its own plausible-sounding fix into a dead end, and only found the real story by feeding the benchmark what production actually sees.
+
+The judgments, extended one more time: measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong — and, the one this post earned, **read the source before you rewrite it.** A fix that doesn't move the number isn't a fix. Go find out why.
 
 That was always the point.
