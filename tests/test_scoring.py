@@ -33,7 +33,7 @@ def test_reranker_scores_a_relevant_chunk_higher_than_an_irrelevant_one():
     # rerank returns one score per document, in input order.
     relevant_score, irrelevant_score = list(_reranker().rerank(query, [relevant, irrelevant]))
 
-    # jina scores are logits — unbounded and often negative (here ~ +1.25 vs ~ -3.72).
+    # jina's compute_score() is a sigmoid-normalized probability in [0, 1].
     assert relevant_score > irrelevant_score
 
 

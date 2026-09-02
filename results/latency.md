@@ -1,5 +1,11 @@
 # Retrieval & rerank latency (measured)
 
+**STALE as of the torch/CUDA backend swap** (see [`DEPLOY.md`](../DEPLOY.md)): the numbers below
+were measured against the old `fastembed`/ONNX (quantized, graph-optimized) reranker. The new
+`transformers`/torch reranker measures ~500 s for the same 20-candidate rerank on CPU -- roughly
+20x slower, not yet reflected here. Not re-run/re-published pending a decision on whether to
+pursue CPU quantization for the new backend (see `eval/eval_pipeline.py`'s findings).
+
 Per-stage wall-clock over the 20-question golden set, warm (one-time model load excluded).
 Measured on **CPU** — the free/local build — via `eval/compare_retrievers.py --latency`.
 

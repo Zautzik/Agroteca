@@ -24,6 +24,16 @@ def _to_or_query(text: str) -> str:
     return " OR ".join(keep)
 
 
+_SQL = """
+    SELECT c.chunk_id, d.source_file, c.text
+    FROM chunks c JOIN documents d ON c.doc_id = d.doc_id,
+         websearch_to_tsquery('simple', %s) AS q
+    WHERE c.tsv @@ q {tier_filter}
+    ORDER BY ts_rank_cd(c.tsv, q) DESC
+    LIMIT %s
+"""
+
+
 def lexical_search(conn, query: str, n: int, tiers: list[str] | None = None):
     """Return the top-n keyword matches as [(chunk_id, source_file, text), ...]."""
     or_query = _to_or_query(query)
@@ -32,12 +42,18 @@ def lexical_search(conn, query: str, n: int, tiers: list[str] | None = None):
     tier_filter, params = "", ()
     if tiers:
         tier_filter, params = "AND c.tier = ANY(%s)", (tiers,)
-    sql = f"""
-        SELECT c.chunk_id, d.source_file, c.text
-        FROM chunks c JOIN documents d ON c.doc_id = d.doc_id,
-             websearch_to_tsquery('simple', %s) AS q
-        WHERE c.tsv @@ q {tier_filter}
-        ORDER BY ts_rank_cd(c.tsv, q) DESC
-        LIMIT %s
-    """
+    sql = _SQL.format(tier_filter=tier_filter)
     return conn.execute(sql, (or_query, *params, n)).fetchall()
+
+
+async def lexical_search_async(conn, query: str, n: int, tiers: list[str] | None = None):
+    """Async twin of lexical_search for the FastAPI serving path (an awaited pooled connection)."""
+    or_query = _to_or_query(query)
+    if not or_query:
+        return []
+    tier_filter, params = "", ()
+    if tiers:
+        tier_filter, params = "AND c.tier = ANY(%s)", (tiers,)
+    sql = _SQL.format(tier_filter=tier_filter)
+    cur = await conn.execute(sql, (or_query, *params, n))
+    return await cur.fetchall()

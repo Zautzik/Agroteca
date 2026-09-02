@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 
@@ -6,7 +7,13 @@ from ollama import Client
 
 from agroteca.config import settings
 from agroteca.ingest import store
-from agroteca.retrieve.rerank import rerank_scored, rerank_scored_bilingual, rerank_search
+from agroteca.retrieve.rerank import (
+    rerank_scored,
+    rerank_scored_async,
+    rerank_scored_bilingual,
+    rerank_scored_bilingual_async,
+    rerank_search,
+)
 from agroteca.retrieve.translate import translate_query
 
 # One reusable client. Short connect timeout (if Ollama is down, fail fast) but a generous
@@ -127,6 +134,56 @@ def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
         rows = rerank_scored(conn, question, k=k)
     meta = _meta_for(conn, [r[0] for r in rows])
     retrieval_ms = int((time.perf_counter() - t0) * 1000)
+
+    sources = [
+        {"source": sf, "tier": meta.get(cid, ("?", None))[0], "page": meta.get(cid, ("?", None))[1],
+         "score": round(sc, 3), "snippet": text.strip()[:240]}
+        for (cid, sf, text, sc) in rows
+    ]
+    meta_line = json.dumps({"type": "meta", "sources": sources, "retrieval_ms": retrieval_ms,
+                            "translated_query": translated}) + "\n"
+    pages = {cid: meta.get(cid, ("?", None))[1] for (cid, sf, text, sc) in rows}
+    context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows], pages)
+    return meta_line, context
+
+
+async def _meta_for_async(conn, chunk_ids):
+    """Async twin of _meta_for for the FastAPI serving path."""
+    if not chunk_ids:
+        return {}
+    cur = await conn.execute(
+        "SELECT chunk_id, tier, page FROM chunks WHERE chunk_id = ANY(%s)", (list(chunk_ids),)
+    )
+    rows = await cur.fetchall()
+    return {cid: (tier, page) for cid, tier, page in rows}
+
+
+async def retrieve_ranked_async(conn, question: str, k: int = 5):
+    """The retrieval-only phase, shared by prepare_ndjson_async (the /ask/stream + generation
+    path) and the /retrieve route (eval/introspection -- no generation): translate + hybrid
+    rerank + tier/page lookup. translate_query is a blocking Ollama call, so it runs in a
+    worker thread rather than the event loop.
+
+    Returns (rows, meta, retrieval_ms, translated):
+      rows -> [(chunk_id, source_file, text, score), ...], best first
+      meta -> {chunk_id: (tier, page)}
+    """
+    t0 = time.perf_counter()
+    translated = await asyncio.to_thread(translate_query, question) if settings.translate_queries else None
+    if translated:
+        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k)
+    else:
+        rows = await rerank_scored_async(conn, question, k=k)
+    meta = await _meta_for_async(conn, [r[0] for r in rows])
+    retrieval_ms = int((time.perf_counter() - t0) * 1000)
+    return rows, meta, retrieval_ms, translated
+
+
+async def prepare_ndjson_async(conn, question: str, k: int = 5) -> tuple[str, str]:
+    """Async twin of prepare_ndjson, for a route holding an injected AsyncConnection. Same
+    contract: returns (meta_line, context) so the caller can let the connection go back to
+    the pool (via FastAPI's Depends teardown) before the DB-free generation stream starts."""
+    rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, question, k)
 
     sources = [
         {"source": sf, "tier": meta.get(cid, ("?", None))[0], "page": meta.get(cid, ("?", None))[1],

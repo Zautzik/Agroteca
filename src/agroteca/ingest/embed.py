@@ -1,4 +1,4 @@
-"""Stage 4 — embeddings via fastembed (ONNX runtime, CPU-friendly, no PyTorch).
+"""Stage 4 — embeddings via sentence-transformers (PyTorch, GPU-resident on `settings.device`).
 
 The model is config-driven (`settings.embed_model`); the SHIPPED default is
 `paraphrase-multilingual-MiniLM-L12-v2` (384-dim). E5 models — a measured but deliberately
@@ -11,7 +11,8 @@ the configured model's dimension — swapping the model is a schema change, not 
 from functools import lru_cache
 
 import numpy as np
-from fastembed import TextEmbedding
+import torch
+from sentence_transformers import SentenceTransformer
 
 from agroteca.config import settings
 
@@ -35,16 +36,21 @@ _IS_E5 = _is_e5(settings.embed_model)
 
 
 @lru_cache(maxsize=1)
-def _model() -> TextEmbedding:
-    # Downloads the ONNX weights on first use, then caches on disk.
-    return TextEmbedding(model_name=settings.embed_model, threads=settings.ort_threads)
+def _model() -> SentenceTransformer:
+    # Downloads the weights on first use, then caches on disk; resident on settings.device
+    # for the process lifetime (moving a loaded model between devices is not free).
+    return SentenceTransformer(settings.embed_model, device=settings.resolved_device)
 
 
 def embed_passages(texts: list[str]) -> list[np.ndarray]:
     """Embed document chunks."""
-    return list(_model().embed(_as_passages(texts, _IS_E5), batch_size=settings.batch_size))
+    with torch.inference_mode():
+        vecs = _model().encode(_as_passages(texts, _IS_E5), batch_size=settings.batch_size,
+                               convert_to_numpy=True, show_progress_bar=False)
+    return list(vecs)
 
 
 def embed_query(text: str) -> np.ndarray:
     """Embed a single query."""
-    return next(iter(_model().embed([_as_query(text, _IS_E5)])))
+    with torch.inference_mode():
+        return _model().encode(_as_query(text, _IS_E5), convert_to_numpy=True, show_progress_bar=False)

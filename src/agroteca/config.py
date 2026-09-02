@@ -39,8 +39,27 @@ class Settings(BaseSettings):
     # --- reranker (cross-encoder, Phase 4) ---
     # multilingual cross-encoder; only runs on the small hybrid candidate pool.
     rerank_model: str = "jinaai/jina-reranker-v2-base-multilingual"
+    # Pinned: this model loads with trust_remote_code=True (it ships a custom architecture),
+    # which executes Python from the HF repo. Pinning the commit means a later push to that repo
+    # can't silently change what runs here -- bump deliberately, after reviewing the diff.
+    rerank_model_revision: str = "9cfeff2df7d40d1b78e75e5e9cebec92a99813c9"
     rerank_candidates: int = 20   # how many hybrid results to re-score
-    ort_threads: int | None = None  # ONNX intra-op threads for embed+rerank; None = all cores, lower to bound concurrency
+
+    # --- inference device (embedder + reranker; the generation LLM runs in Ollama, separately) ---
+    # "cuda" by default: this is a GPU-serving deployment, and warmup.load_and_warm() refuses to
+    # silently fall back to CPU if AGROTECA_DEVICE=cuda but no GPU is visible (fail loud, not slow).
+    # "cpu" forces CPU explicitly (local iteration on a GPU-less machine). "auto" resolves to
+    # cuda-if-available-else-cpu at warmup time -- an explicit opt OUT of the fail-loud guarantee,
+    # for "same code, $0 locally, real GPU in prod" workflows that don't need that guarantee.
+    device: str = "cuda"
+    warmup_batch_size: int = 8   # dummy batch size for the startup warmup forward pass
+
+    @property
+    def resolved_device(self) -> str:
+        if self.device != "auto":
+            return self.device
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
 
     # --- generation (LLM) ---
     # Local Ollama by default; deploy swaps to a hosted/smaller model by setting

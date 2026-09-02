@@ -5,8 +5,8 @@ description = "Eval-first bilingual agricultural RAG"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "einops>=0.8.0",
     "fastapi>=0.141.1",
-    "fastembed>=0.8.0",
     "httpx>=0.28.1",
     "ollama>=0.6.2",
     "pgvector>=0.5.0",
@@ -14,6 +14,13 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
     "pymupdf>=1.28.0",
+    "sentence-transformers>=3.0.0",
+    "torch>=2.3.0",
+    # <5: jinaai/jina-reranker-v2's trust_remote_code modeling file imports
+    # create_position_ids_from_input_ids from transformers.models.xlm_roberta -- removed in the
+    # 5.x rewrite (confirmed by hitting the ImportError against 5.16.1). Bump only after
+    # re-verifying that remote code still loads.
+    "transformers>=4.44.0,<5",
     "uvicorn>=0.52.1",
 ]
 

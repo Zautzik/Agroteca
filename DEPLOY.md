@@ -25,7 +25,7 @@ in [`eval/results.csv`](eval/results.csv).
 | `AGROTECA_GEN_TIMEOUT` | `300` | read timeout (s); lower it for a fast hosted model |
 | `AGROTECA_GEN_NUM_PREDICT` | `1024` | max answer tokens |
 | `AGROTECA_DB_POOL_MAX` | `8` | pool ceiling; size to expected concurrency |
-| `AGROTECA_ORT_THREADS` | *(all cores)* | set to bound ONNX threads if rerank requests overlap |
+| `AGROTECA_DEVICE` | `cuda` | embedder/reranker device; `warmup.py` refuses to start if this is `cuda` and no GPU is visible. Set `cpu` explicitly for GPU-less local iteration (much slower -- see below), or `auto` to resolve cuda-if-available-else-cpu at startup (same code/image both places, but opts OUT of the fail-loud guarantee -- a "production" box that silently lost its GPU would serve on CPU instead of refusing to start) |
 | `AGROTECA_RERANK_CANDIDATES` | `20` | lower to trade a little recall for reranker speed |
 
 Changing `AGROTECA_EMBED_MODEL` also needs a re-index **and** a matching `VECTOR(n)` column
@@ -43,9 +43,17 @@ The app speaks the **Ollama HTTP API** (via the `ollama` client). Two paths:
   [`src/agroteca/generate.py`](src/agroteca/generate.py) — the whole LLM surface. The prompt,
   grounding rules, abstention phrase, and NDJSON streaming protocol stay identical.
 
-The embedder and cross-encoder reranker run **in-process** (fastembed / ONNX). CPU by default
-(reranker ~25 s/query — the free-tier tax); pass a CUDA provider / `cuda=True` on a GPU box, or
-use a hosted reranker, to make retrieval sub-second. See [`results/latency.md`](results/latency.md).
+The embedder and cross-encoder reranker run **in-process** on `torch` (`sentence-transformers` /
+`transformers`), CUDA by default — `AGROTECA_DEVICE=cuda` — for fast retrieval. **CPU is no
+longer viable for real use**: `AGROTECA_DEVICE=cpu` measures ~500 s to rerank one query's
+20-candidate pool (vs. ~25-30 s for the old ONNX/fastembed backend this replaced -- see
+[`results/latency.md`](results/latency.md), now stale). `compute_score()`'s own batching is
+already correct (confirmed by reading its source); the gap is that this eager-mode PyTorch path
+has no quantization or graph optimization, unlike the ONNX weights it replaced. A GPU is now a
+hard requirement in practice, not just a speed lever. Both models' CUDA context and VRAM are warmed inside
+the server process's own startup (`src/agroteca/warmup.py`, called from `api.py`'s lifespan)
+before it accepts requests — see that module for why a separate pre-exec warmup step can't do
+this warming itself.
 
 ## Ship it as a container (recommended)
 
@@ -58,30 +66,36 @@ serves the API *and*, with an override command, runs the ingest — same code, s
 docker build -t agroteca .
 
 # One-shot ingest into your managed Postgres (LOCAL_MODE is already 0 in the image).
-docker run --rm \
+docker run --rm --gpus all \
   -e AGROTECA_DB_URL="postgresql://user:pass@host:5432/agroteca" \
   agroteca python -m agroteca.ingest.run
 
-# Serve. The volume caches the ~1.5 GB of models so a restart doesn't re-download them.
-docker run -d --name agroteca -p 8000:8000 \
+# Serve. Needs a CUDA-capable host + nvidia-container-toolkit for --gpus (AGROTECA_DEVICE=cuda
+# is the image default); pass -e AGROTECA_DEVICE=cpu instead to run without a GPU.
+docker run -d --name agroteca -p 8000:8000 --gpus all \
   -e AGROTECA_DB_URL="postgresql://user:pass@host:5432/agroteca" \
   -e AGROTECA_GEN_BASE_URL="https://your-ollama-host" \
   -e AGROTECA_GEN_MODEL="<fast-model>" \
   -e AGROTECA_GEN_TIMEOUT=60 \
-  -v agroteca-models:/app/.cache \
   agroteca
 ```
 
-First boot is slow on purpose — it downloads both models, then *runs* them once so the first
-real request is fast (>90 s → 27 s). `docker inspect --format '{{.State.Health.Status}}'
-agroteca` reports `healthy` only after `Application startup complete`; put a reverse proxy
-(Caddy / nginx) in front for TLS and don't expose 8000 directly.
+Do **not** mount a volume over `/app/.cache` — the models are baked into the image (below), and
+an empty volume there would shadow them and force a re-download despite `AGROTECA_LOCAL_MODE`
+having no network access story for that. First boot still isn't instant: `docker-entrypoint.sh`
+runs a fail-fast GPU preflight, then the server process itself loads both models onto CUDA and
+runs one real forward pass through each before it accepts requests (>90 s unwarmed → 27 s
+first-request retrieval, on the old CPU numbers this hasn't been re-measured against yet).
+`docker inspect --format '{{.State.Health.Status}}' agroteca` reports `healthy` only after
+`Application startup complete`; put a reverse proxy (Caddy / nginx) in front for TLS and don't
+expose 8000 directly.
 
-**Baking the models in.** The image downloads models at runtime to stay lean (~590 MB;
-the ~1.5 GB of models live in the cache volume) and let one cache volume serve many restarts. For an immutable or offline deploy, pre-pull them at
-build time instead: add a stage that runs a single `warm_reranker()` + `embed_query()` with
-`HF_HOME`/`FASTEMBED_CACHE_PATH` set to a build dir, then `COPY` that cache into the runtime
-stage. Trades a ~1.5 GB fatter image for a cold start with no network dependency.
+**Model weights are baked in, not downloaded at runtime.** The `model-bake` build stage in the
+[`Dockerfile`](Dockerfile) downloads the embedder + reranker weights and runs one warm pass
+each (on CPU — `docker build` has no GPU access, and none is needed just to populate the cache),
+then the runtime stage `COPY`s that cache in. This is why the running container has no network
+dependency for its models and why mounting a cache volume over it (the old, pre-CUDA pattern)
+is now actively wrong.
 
 ## Or run from source
 
@@ -114,11 +128,14 @@ Put a reverse proxy (Caddy / nginx) in front for TLS. `--reload` is dev-only.
 - **Guardrails are on.** Questions are length-bounded, feedback votes are validated, a hostile
   1 MB payload is rejected at the edge.
 - **Concurrency.** Each streamed request holds a pooled connection only for retrieval, then
-  releases it before the (connection-free) generation. Size `AGROTECA_DB_POOL_MAX` to your
-  concurrency; cap `AGROTECA_ORT_THREADS` if multiple rerank requests can overlap.
+  releases it before the (connection-free) generation. The API's async pool is sized in code
+  (`min_size=5, max_size=20, timeout=30.0` in `api.py`'s lifespan) rather than via
+  `AGROTECA_DB_POOL_MAX`, which now only governs the sync pool the CLI/ingest/eval scripts use.
 
 ## Cost reality (say it plainly)
 
-On CPU this is a correct, slow system (~25 s retrieval + minutes of generation). The hardening
-makes it **deployable**; a GPU — or a hosted model + reranker — makes it **fast**. That's a
-dollar figure, not a code change, and the config above is exactly where you spend it.
+The shipped default (`AGROTECA_DEVICE=cuda`) needs a GPU box — `warmup.py` refuses to start
+otherwise. `AGROTECA_DEVICE=cpu`/`auto` run without one, but the rerank step alone now measures
+~500 s/query (see [Generation](#generation-the-one-real-decision) above) — CPU is a correctness
+fallback for local dev, not a usable free tier the way the pre-CUDA-refactor build was. A GPU is
+the cost of this system actually working, not just the cost of making it fast.

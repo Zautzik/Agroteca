@@ -355,12 +355,19 @@
   function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
   function hasCitation(t) { return /\([^)]{4,}\)/.test(t); }
   function fmtMs(ms) { if (ms < 1000) return ms + 'ms'; const s = ms / 1000; if (s < 90) return s.toFixed(0) + 's'; const m = Math.floor(s / 60), r = Math.round(s % 60); return m + 'm' + (r ? ' ' + r + 's' : ''); }
-  function scorePct(s) { return Math.round(Math.max(0, Math.min(1, (s + 1) / 1.6)) * 100); }
+  // The reranker's compute_score() is a sigmoid-normalized probability in [0, 1] (not the raw,
+  // unbounded, sometimes-negative logit the old ONNX backend returned), so both the bar and the
+  // low-confidence gate map/threshold that range directly.
+  function scorePct(s) { return Math.round(Math.max(0, Math.min(1, s)) * 100); }
+  // Provisional cutoff from two spot-checked scores (a relevant chunk ~0.29, an irrelevant one
+  // ~0.06) -- not yet calibrated against eval/'s golden set under the new scoring. Revisit once
+  // that's measured.
+  const LOW_CONFIDENCE_SCORE = 0.15;
   function tierBadge(tier) { const map = { open: ['tier-open', 'open'], synthetic: ['tier-syn', 'synthetic'], local: ['tier-local', 'local'], distractor: ['tier-dist', 'distractor'] }; const e = map[tier] || ['tier-unk', tier || '?']; return '<span class="tier ' + e[0] + '">' + esc(e[1]) + '</span>'; }
   function renderSources(meta) {
     if (!meta || !meta.sources || !meta.sources.length) return '';
     const t = I18N[currentLang];
-    const low = meta.sources[0].score < 0 ? '<div class="lowconf">⚠ ' + t.lowConfidence + '</div>' : '';
+    const low = meta.sources[0].score < LOW_CONFIDENCE_SCORE ? '<div class="lowconf">⚠ ' + t.lowConfidence + '</div>' : '';
     const rows = meta.sources.map(s =>
       '<div class="src"><div class="src-head">' + tierBadge(s.tier) + '<span class="src-name">' + esc(s.source) + (s.page ? ' <span class="src-page">· p. ' + s.page + '</span>' : '') + '</span><span class="src-score">' + s.score.toFixed(2) + '</span></div>'
       + '<div class="scorebar"><span style="width:' + scorePct(s.score) + '%"></span></div><div class="src-snip">' + esc(s.snippet) + '…</div></div>'

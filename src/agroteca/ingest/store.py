@@ -5,8 +5,8 @@ The `tsv` keyword column is built with the language-agnostic 'simple' config so
 Phase 3's hybrid lexical search matches exact tokens consistently across ES+EN.
 """
 import psycopg
-from pgvector.psycopg import register_vector
-from psycopg_pool import ConnectionPool
+from pgvector.psycopg import register_vector, register_vector_async
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agroteca.config import settings
 
@@ -35,6 +35,24 @@ def make_pool(min_size: int = 1, max_size: int | None = None) -> ConnectionPool:
         kwargs=KEEPALIVE,
         configure=register_vector,
         check=ConnectionPool.check_connection,   # SELECT 1 on checkout; discard + replace dead conns
+        open=False,
+    )
+
+
+def make_async_pool(min_size: int = 5, max_size: int = 20, timeout: float = 30.0) -> AsyncConnectionPool:
+    """The served API's connection pool (FastAPI lifespan). Async so a request awaiting a
+    checkout never blocks the event loop -- the concurrency headroom min_size=5/max_size=20
+    guards against is thread/request starvation under load, not a single blocking pool.
+    `open=False`: an async pool must be opened with `await pool.open()` from a running event
+    loop (the lifespan), not constructed-and-opened at import time like the sync pool above."""
+    return AsyncConnectionPool(
+        settings.db_url,
+        min_size=min_size,
+        max_size=max_size,
+        timeout=timeout,
+        kwargs=KEEPALIVE,
+        configure=register_vector_async,
+        check=AsyncConnectionPool.check_connection,
         open=False,
     )
 

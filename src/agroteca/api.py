@@ -2,39 +2,49 @@ import json
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import AsyncIterator, Literal
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
 from agroteca.config import settings
-from agroteca.generate import prepare_ndjson, stream_ndjson
+from agroteca.generate import prepare_ndjson_async, retrieve_ranked_async, stream_ndjson
 from agroteca.ingest import store
-from agroteca.ingest.embed import embed_query
-from agroteca.retrieve.rerank import warm as warm_reranker
-
-# A pooled DB connection for the served API — reused across requests instead of a fresh
-# TCP handshake + auth per question. Opened in the lifespan, below.
-pool = store.make_pool()
+from agroteca.warmup import load_and_warm
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm the heavy models once at startup. FastAPI runs sync endpoints in a threadpool,
-    # so without this the first few concurrent requests could each trip the
-    # lru_cache(maxsize=1) cold-start and load the 1.1 GB reranker several times over.
-    warm_reranker()          # load + cache the cross-encoder
-    embed_query("warm")      # load + cache the embedder
-    pool.open()
-    pool.wait()              # block until the pool has a live connection ready
+    # Load + warm both GPU-resident models in THIS process (the one that will actually serve
+    # requests) before accepting connections -- see agroteca/warmup.py for why this must happen
+    # here and not in a separate pre-exec script. Also guards against the lru_cache cold-start
+    # racing across concurrent requests.
+    load_and_warm()
+
+    # The served API's pooled DB connections — reused across requests instead of a fresh TCP
+    # handshake + auth per question. min_size=5/max_size=20/timeout=30.0 give headroom against
+    # request starvation under concurrent load; construct+open here (not at import time) since
+    # an async pool must open from a running event loop.
+    pool = store.make_async_pool(min_size=5, max_size=20, timeout=30.0)
+    await pool.open(wait=True, timeout=30.0)
+    app.state.pool = pool
     yield
-    pool.close()
+    await app.state.pool.close()
 
 
 app = FastAPI(title="Agroteca", lifespan=lifespan)
 STATIC = Path(__file__).parent / "static"
 FEEDBACK_LOG = settings.root / "feedback.jsonl"
+
+
+async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
+    """DI hook: check out a pooled async connection for the route. Routes take it via
+    `Depends(get_conn)` instead of touching the pool directly; FastAPI closes this generator
+    (returning the connection to the pool) as soon as the route function returns."""
+    async with request.app.state.pool.connection() as conn:
+        yield conn
 
 
 class Question(BaseModel):
@@ -48,6 +58,21 @@ class Feedback(BaseModel):
     answer_preview: str = Field("", max_length=5000)
 
 
+class RetrievedChunk(BaseModel):
+    chunk_id: str
+    source_file: str
+    page: int | None = None
+    tier: str
+    score: float
+    text: str
+
+
+class RetrieveResponse(BaseModel):
+    sources: list[RetrievedChunk]
+    retrieval_ms: int
+    translated_query: str | None = None
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
@@ -59,12 +84,11 @@ def health():
 
 
 @app.get("/stats")
-def stats():
-    """Cheap corpus stats for the UI ribbon (no model, one round-trip)."""
-    with pool.connection() as conn:
-        chunks = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
-        docs = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
-        tiers = conn.execute("SELECT count(DISTINCT tier) FROM chunks").fetchone()[0]
+async def stats(conn: AsyncConnection = Depends(get_conn)):
+    """Cheap corpus stats for the UI ribbon (no model, one round-trip per count)."""
+    chunks = (await (await conn.execute("SELECT count(*) FROM chunks")).fetchone())[0]
+    docs = (await (await conn.execute("SELECT count(*) FROM documents")).fetchone())[0]
+    tiers = (await (await conn.execute("SELECT count(DISTINCT tier) FROM chunks")).fetchone())[0]
     return {"chunks": chunks, "documents": docs, "tiers": tiers}
 
 
@@ -90,13 +114,29 @@ def manifest():
     })
 
 
+@app.post("/retrieve", response_model=RetrieveResponse)
+async def retrieve(payload: Question, conn: AsyncConnection = Depends(get_conn)):
+    """Retrieval-only: hybrid search + rerank, no LLM generation. Exists for eval/introspection
+    (e.g. eval/eval_pipeline.py) so measuring retrieval accuracy/latency doesn't pay for a full
+    CPU/GPU generation call per query -- /ask/stream bundles both and would badly pollute a
+    latency measurement meant to isolate retrieval."""
+    rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, payload.question)
+    sources = [
+        RetrievedChunk(chunk_id=cid, source_file=sf, tier=meta.get(cid, ("?", None))[0],
+                       page=meta.get(cid, ("?", None))[1], score=round(sc, 4), text=text)
+        for (cid, sf, text, sc) in rows
+    ]
+    return RetrieveResponse(sources=sources, retrieval_ms=retrieval_ms, translated_query=translated)
+
+
 @app.post("/ask/stream")
-def ask_stream(payload: Question):
+async def ask_stream(payload: Question, conn: AsyncConnection = Depends(get_conn)):
     """Stream the answer as NDJSON: meta (sources + scores + tiers + timing), then token
-    frames, then a done frame. The pooled connection is held only for retrieval, then
-    returned to the pool BEFORE the (connection-free) generation stream."""
-    with pool.connection() as conn:
-        meta_line, context = prepare_ndjson(conn, payload.question)
+    frames, then a done frame. The injected connection is used only for retrieval, then
+    returned to the pool (via the get_conn dependency's teardown, once this coroutine
+    returns) BEFORE the StreamingResponse body -- the connection-free generation stream --
+    is actually iterated."""
+    meta_line, context = await prepare_ndjson_async(conn, payload.question)
 
     def gen():
         yield meta_line
