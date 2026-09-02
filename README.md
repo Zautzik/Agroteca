@@ -1,268 +1,190 @@
-# 🌱 Agroteca
+# Agroteca
 
-**An eval-first, bilingual (ES/EN) Retrieval-Augmented Generation system over agricultural documents — built measurement-first, with a governed, provenance-aware corpus.**
+An eval-first Retrieval-Augmented Generation (RAG) pipeline achieving 0.75 retrieval@5 accuracy via hybrid search and cross-encoder reranking.
 
-> **Status: Phases 1–8 complete.** Governed corpus → ingestion → hybrid retrieval → cross-encoder reranking → grounded, cited, **abstaining** generation → a streaming FastAPI service → a polished bilingual **web app** → a **production-hardened serving layer** (config-driven models, a health-checked connection pool, input guardrails, page-precise citations, a startup warm-up that cut the first request from >90 s to 27 s) — all verified against a live running server. The one step left is the public URL, a hosting-cost decision rather than a code problem.
->
-> **The number that matters:** retrieval@5 **0.35 (dense) → 0.45 (hybrid) → 0.75 (reranked)** — every step measured against a golden set built *before* the retriever existed (20 answerable questions).
->
-> **Beyond the build:** the app is **containerized** (a two-stage `uv` image, non-root, health-checked) over **idempotent, resumable ingestion** — and I ran the embedder upgrade as a **complete controlled experiment**, a full e5-large re-index that *disproved my own hypothesis* and taught me more than a green metric would have (see [Design decisions](#design-decisions-and-why)).
+Retrieval@5 (defined precisely in [Benchmark Results](#benchmark-results-measured) below) is scored against a 22-question golden set written *before* the retriever existed, over a bilingual (ES/EN) agricultural document corpus. Every stage of the cascade — dense, hybrid, reranked — is a measured line in [`eval/results.csv`](eval/results.csv), not an internal estimate. The same discipline extends to serving: an async connection pool sized and load-bearing under FastAPI's dependency injection, and explicit model warmup that pays CUDA/VRAM initialization once at process start instead of on a user's first request.
 
-**Stack:** Python · FastAPI · Postgres + pgvector · full-text search · fastembed (ONNX) · a multilingual cross-encoder reranker · Ollama (local LLM) · `uv` · Docker · a self-contained streaming web front end.
+**Stack:** Python · FastAPI · Postgres + pgvector · Postgres full-text search · `sentence-transformers` / `transformers` (PyTorch, CUDA) · a multilingual cross-encoder reranker · Ollama (self-hosted LLM) · `psycopg_pool` · Docker · `uv`.
 
 ---
 
-## Highlights
-
-- **Eval-first, and it earned its keep.** The 22-question golden set was written *before* the retriever, so every change is measured, not guessed — and it once flagged a "hallucination" that turned out to be a **mislabeled ground-truth answer** (I fixed the label, not the model).
-- **A measured retrieval cascade.** dense → hybrid (Reciprocal Rank Fusion) → cross-encoder reranking, each stage's gain proven on the golden set: **retrieval@5 0.35 → 0.45 → 0.75**, six questions fixed with **zero regressions**.
-- **Grounded and cited — or an honest "I don't know."** Generation answers only from retrieved context, cites its sources **to the page** (`Book.pdf, p. 37`), and abstains (with a canonical, machine-checkable phrase) when the corpus can't answer.
-- **A transparency-first web app.** A bilingual, streaming UI where every answer opens a drawer exposing the exact retrieved chunks, their cross-encoder relevance scores, and governance tiers — plus a retrieval-vs-generation latency breakdown. *Show your work.*
-- **Provenance as a first-class concern.** A four-tier governed corpus (open / local-only / synthetic / distractor) where the tier controls where a document may appear; copyrighted material is confined to a local-only mode and never shipped publicly.
-- **Local-first, measured model choices — and I *ran the experiment*.** A MiniLM embedder and a 3B local LLM, each chosen by *measured* throughput, not hype (e5-large is a benchmarked 50× slower on CPU). When the embedder looked like the bottleneck I didn't guess — I ran the upgrade end-to-end: a controlled cosine pilot, a cheap re-chunk probe, then a full **e5-large re-index**. It **doubled dense retrieval** (0.35 → 0.75) yet barely moved the final number — because the reranker was already *masking* the weak dense — and it **disproved my prediction** that it would fix the cross-lingual misses. I kept the fast model and documented why. *The finding was the value, not the swap.*
-- **Hardened by actually running it.** Standing the server up surfaced — and fixed — the bugs no offline test shows: a DB connection that died idle behind Docker's proxy, a timeout that strangled slow-but-correct answers, and an ONNX cold-start that made the first request 3× slower. Config-driven models, a health-checked connection pool, input guardrails, and a startup warm-up now stand between "runs on my laptop" and "serves strangers."
-
----
-
-## What it is
-
-Agroteca answers agronomy questions — *"which alfalfa variety was used in the INIA trials?"*, *"how much rainwater can a roof harvest?"* — **strictly from a curated document corpus**, in Spanish or English, **with citations**, and with the discipline to say **"I don't know"** when the corpus can't answer.
-
-The domain corpus is anchored on **Chile's INIA** agricultural publications, extended with **FAO**, university extension, CGIAR, and public-domain sources, plus the relevant slice of **Chilean agricultural and food-safety law**.
-
-## Why it's built this way
-
-Most RAG projects build the pipeline, eyeball a few demo questions, and call it done — with no way to know whether any change is an improvement. Agroteca inverts that: **the evaluation set was built before the retrieval system**, so every change is measured, not guessed. This is the single most load-bearing decision in the project — and it has already paid for itself (see [The receipts](#the-receipts)). The full story is in [`notes.md`](notes.md).
-
----
-
-## Architecture
-
-Two machines: an **offline** indexer (run once) and an **online** query path (run per question).
+## System Architecture
 
 ```
- OFFLINE ─ build the index ─────────────┐    ONLINE ─ answer a question ────────────────────────┐
-                                         │                                                       │
- PDFs → extract → normalize → chunk →    │  question → embed → ┌ dense  (pgvector) ┐             │
- embed → store (pgvector + tsvector) ────┼──────────────────── ┤   RRF fusion      ├→ rerank →   │
-                                         │                     └ lexical (FTS)     ┘   top-k     │
-                                         │                                                ↓       │
-                                         │                   local LLM:  GROUND · CITE · ABSTAIN  │
- ────────────────────────────────────────┘ ──────────────────────────────────────────────────────┘
+ OFFLINE ── build the index ────────────┐    ONLINE ── answer a question ─────────────────────────┐
+                                         │                                                         │
+ PDFs → extract → normalize → chunk →   │  question → embed → ┌ dense  (pgvector) ┐                │
+ embed → store (pgvector + tsvector) ───┼──────────────────── ┤   RRF fusion      ├→ rerank(top-5) │
+                                         │                     └ lexical (FTS)     ┘         ↓      │
+                                         │                        LLM: GROUND · CITE · ABSTAIN      │
+ ────────────────────────────────────── ┘ ────────────────────────────────────────────────────────┘
 ```
 
-Each retrieval stage exists to fix the previous stage's blind spot: dense understands paraphrase but misses exact codes (`WL-323`); lexical nails exact codes but misses paraphrase; hybrid gets both; the cross-encoder reranker sharpens precision before the answer reaches the LLM.
+### Concurrency: `psycopg_pool.AsyncConnectionPool`
 
----
+The served API holds one process-lifetime `psycopg_pool.AsyncConnectionPool` (`min_size=5, max_size=20, timeout=30.0`), opened in the FastAPI `lifespan` and injected into every route via a `Depends(get_conn)` dependency — routes never touch the pool object directly, and never manage checkout/checkin themselves:
 
-## The corpus: four governed tiers
-
-Provenance and licensing are treated as first-class. Every document lives in exactly one tier, and the tier controls where it is allowed to appear. Full policy in [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).
-
-| Tier | Manifest | Loads when | Role |
-|---|---|---|---|
-| **Open / deployable** | `data/manifest.csv` | always | open-license / gov / public-domain — real citations, safe to deploy publicly |
-| **Local-only** | `data/manifest_local.csv` | `LOCAL_MODE` only | copyrighted books — available to the local farm tool, never shipped in a public demo |
-| **Synthetic reference** | `data/manifest_synthetic.csv` | always | original, human-verified concept notes grounded in open sources; cited *as* synthetic |
-| **Distractor** | `data/manifest_distractor.csv` | eval only | deliberate off-topic hard-negatives; never a valid answer source |
-
-Two principles decide what may enter the answerable corpus: the **idea/expression** distinction (facts are free; copyrighted expression is not) and **citation integrity** (the system never attributes synthesized text to a real source).
-
----
-
-## Evaluation
-
-The heart of the project is a **golden set** of 22 hand-verified question/answer pairs (`eval/golden_set.jsonl`), deliberately stratified to stress specific parts of the system:
-
-- **Factual lookup** — basic retrieval + extraction
-- **Exact-term** (variety codes, cultivar names, species) — the justification for hybrid keyword+semantic search
-- **Synthesis** — multi-sentence reasoning
-- **No-answer** — measures abstention / hallucination resistance
-- **Cross-lingual** (ES question → EN source, and vice-versa) — forces a multilingual embedder
-
-Every answerable question carries a `must_contain` string verified **verbatim against machine-extracted text** (not the source PDF read by eye — a distinction that caught real OCR line-break bugs). Retrieval is scored with a **dual metric** — *answer-chunk@k* (did the exact answer chunk surface?) vs *document@k* (did the right document surface?) — because the gap between them separates a chunking problem from a retrieval problem.
-
-```bash
-uv run python eval/validate_golden.py
-# OK: 22 questions validated against 71 answerable manifest entries (open + local-only + synthetic tiers)
+```python
+async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
+    async with request.app.state.pool.connection() as conn:
+        yield conn
 ```
 
+Two properties this buys, both load-bearing under concurrent load rather than incidental:
+
+- **Checkout is non-blocking.** An `AsyncConnectionPool` awaits a free connection instead of blocking a worker thread, so concurrent requests queue on the pool's own scheduler, not on OS threads. Each connection is validated on checkout (`check=AsyncConnectionPool.check_connection`) and transparently replaced if a proxy — a Docker port-forward, a managed-Postgres load balancer — silently dropped it while idle.
+- **A connection is held only for retrieval, never for generation.** `/ask/stream`'s dependency releases the checked-out connection as soon as the route coroutine returns — *before* the token-streaming response body is iterated — so a slow (potentially multi-second) LLM generation never holds a pooled DB connection hostage. This is enforced by FastAPI's own dependency-teardown ordering, not a manual `finally` block.
+
+A platform-specific correctness note, found by testing, not assumed: on Windows, `asyncio`'s default `ProactorEventLoop` cannot run psycopg's async driver at all (a hard third-party incompatibility, not a config issue) — the serving process requires a selector-based event loop.
+
+### Deterministic Startup: Explicit Model Warmup
+
+`src/agroteca/warmup.py` loads the embedder and cross-encoder reranker onto the configured device and runs one real forward pass through each — `torch.inference_mode()`, then `torch.cuda.synchronize()` on GPU — **inside the same process that will serve requests**, before `uvicorn` accepts its first connection:
+
+```python
+def load_and_warm() -> None:
+    require_cuda()                 # fail loud if AGROTECA_DEVICE=cuda but no GPU is visible
+    embed_passages(WARMUP_BATCH)   # dense embedder: init CUDA context, allocate its VRAM
+    warm_reranker()                # cross-encoder: same
+    if settings.resolved_device == "cuda":
+        torch.cuda.synchronize()   # block until warmup kernels actually finish, not just enqueue
+```
+
+`require_cuda()` is a deliberate fail-fast gate: with `AGROTECA_DEVICE=cuda` (the default), a container that lost GPU access — a bad `--gpus` flag, a missing `nvidia-container-toolkit` install — refuses to start rather than silently degrading to CPU. (`AGROTECA_DEVICE=auto` is available where that guarantee isn't wanted — see [Deployment](#deployment-fully-containerized).) The same warmup call is also the Dockerfile's `ENTRYPOINT` preflight, run before the image's `CMD`.
+
+**An honest scope note on "deterministic":** determinism here means *the same process that serves requests pays model-load and kernel-init cost exactly once, at startup* — not a fixed millisecond bound in the abstract. That distinction matters concretely: on GPU this yields sub-second, consistent per-query reranking. On CPU it does not — eager-mode PyTorch inference over full-length (~512-token) chunks measures **~500 s** for a single 20-candidate rerank call on this system's reference hardware, against the ~25-30 s the project's previous ONNX-based backend achieved on the same CPU (that comparison, and why the gap exists — no batching bug; a quantization/graph-optimization gap — is in [`DEPLOY.md`](DEPLOY.md)). Warmup makes the *first* request as fast as every subsequent one; it does not make CPU inference fast. Treat `AGROTECA_DEVICE=cuda` as a production requirement, not a speed option.
+
+### Retrieval Cascade
+
+Each stage exists to fix the previous stage's blind spot: dense (pgvector cosine kNN) understands paraphrase but misses exact codes (`WL-323`); lexical (Postgres full-text search, `ts_rank_cd`) nails exact codes but misses paraphrase; Reciprocal Rank Fusion combines both rankings by position (sidestepping their incomparable score scales); a cross-encoder reranker reads each `(query, chunk)` pair *together* over the fused top-20 to sharpen precision before generation. Retrieval-only latency and accuracy are measurable independently of generation via a dedicated `/retrieve` endpoint (no LLM call) — see [API Surface](#api-surface).
+
 ---
 
-## The receipts
+## Benchmark Results (measured)
 
-Measured on the answerable golden set (k=5), one variable at a time:
+Retrieval@5 = *answer-chunk@5*: did the top-5 results contain a chunk that is both (a) from the correct source document and (b) contains the verified answer phrase, verbatim, in machine-extracted text — not membership in the right document alone (that weaker signal is `document@5`, shown for reference). Scored over the 22-question golden set (20 answerable) via [`eval/compare_retrievers.py`](eval/compare_retrievers.py); the underlying scoring primitives are in [`eval/_scoring.py`](eval/_scoring.py), reused by every eval script in this repo including the concurrent, HTTP-level [`eval/eval_pipeline.py`](eval/eval_pipeline.py).
 
-| Stage | answer@5 | answer@1 | document@5 | MRR@5 |
+| Stage | retrieval@5 | answer@1 | document@5 | MRR@5 |
 |---|---|---|---|---|
-| Dense (semantic baseline) | 0.35 | 0.30 | 0.65 | 0.33 |
+| Dense only (pgvector cosine kNN) | 0.35 | 0.30 | 0.65 | 0.33 |
 | + Lexical, fused with RRF (hybrid) | 0.45 | 0.15 | 0.65 | 0.25 |
-| **+ Cross-encoder reranking** | **0.75** | **0.75** | **0.90** | **0.75** |
+| **+ Cross-encoder reranking (final)** | **0.75** | **0.75** | **0.90** | **0.75** |
+| — same cascade, deployable corpus only¹ | 0.65 | — | 0.75 | — |
 
-Reranking fixed **six** questions the earlier stages missed, with **zero regressions** — but the sharper story is the ordering columns. `answer@5` only measures membership; **`answer@1` and MRR@5 leap `0.15 → 0.75` and `0.25 → 0.75`**, because whenever the answer is in the pool the reranker **pins it to rank 1**. (Hybrid's `answer@1` *dips below* dense's 0.30 — equal-weight RRF buys pool recall at the cost of top-1 precision, exactly what reranking repairs.)
+¹ Excludes the copyrighted local-only tier (~30% of the index), which a public deployment cannot legally serve — the number above is what an actual production deployment measures, not the full-index figure. Same cascade, zero regressions; the gap is corpus size, not a retrieval regression. Full breakdown: [`eval/results.csv`](eval/results.csv), `deploy` row.
 
-On generation, the system **abstains on the corpus's genuinely unanswerable questions** rather than fabricating, and a **3B local model matched a 7B on abstention at ~3× lower latency** — chosen by measurement, not assumption.
+Reranking fixed six questions the earlier stages missed with **zero regressions**. `retrieval@5` alone hides the sharper story: `answer@1` and `MRR@5` jump `0.15 → 0.75` — whenever the answer is present in the fused pool, the reranker pins it to rank 1. (Hybrid's `answer@1` *dips below* dense's 0.30: equal-weight RRF trades top-1 precision for pool recall, which is exactly what the reranker exists to repair.)
 
-> An honest footnote (because honesty is the brand): lexical search *alone* scored 0.50 at answer@5 vs the 0.45 hybrid — but that's a **single question** at n=20, within noise. The evidence that actually matters is `doc@5`: **0.85 lexical vs 0.65 hybrid, a four-document gap** — equal-weight RRF was diluting the stronger retriever's recall. That's why the project didn't stop at hybrid; reranking is what decisively won. The full story is in [`notes.md`](notes.md) and [`results/`](results/).
-
-### Latency & what a public deploy actually serves — measured
-
-Two numbers an interviewer asks for, both measured (`eval/compare_retrievers.py`), not assumed:
-
-- **Latency (CPU, per stage).** Bi-encoder **retrieval is production-grade — p95 ≤ 250 ms** (dense 106 ms, hybrid 249 ms). The **cross-encoder reranker is the bottleneck at ~25 s p50 on CPU** — the same free/local-inference tax as generation, and sub-second on a GPU or hosted reranker with *no code change* (it only ever scores the ~20-candidate pool). Full table + levers, including a hybrid-only "fast mode": [`results/latency.md`](results/latency.md).
-- **The deployable corpus is smaller than the index.** ~30% of chunks are copyrighted (`local` tier, 11 docs) and can't be served publicly. On the **open + synthetic** corpus a stranger actually gets, the final cascade scores **0.65 answer@5 / 0.75 doc@5** (vs 0.75 / 0.90 on the full index) — lower *only* because two questions (q06, q12) are answered solely by docs a public server can't ship. Same cascade, zero regressions; see the `deploy` row in [`results.csv`](eval/results.csv).
+A negative result kept in the record rather than discarded: a controlled `e5-large` (1024-dim) full re-index *doubled* dense-only recall (0.35 → 0.75) but moved the final cascade number by only one question (0.75 → 0.80, within n=20 noise) — the cross-encoder had been masking a weak embedder the whole time. The upgrade was not shipped (8× query latency, a schema migration, for a noise-level final gain); the finding was kept. Full writeup: [`eval/results.csv`](eval/results.csv), `experiment` rows.
 
 ---
 
-## The web app
-
-A local model on CPU is slow (~minutes per answer), so the front end is built to make a slow, honest system *feel* alive and trustworthy:
-
-- **Watch it grow** — a seed→sprout→flower→fruit reel plays during retrieval, then the answer **streams in token by token**. The wait reads as progress, never a freeze.
-- **Radical transparency** — every answer carries a one-click **"Sources & retrieval"** drawer: the exact chunks it grounded on, each with a governance-tier badge, a cross-encoder relevance bar, and a snippet — plus a retrieval-vs-generation latency breakdown. *The answer isn't magic; here's the evidence.*
-- **Honest by design** — when the corpus can't answer, the card becomes a distinct **empty-basket** state, never a fabricated guess.
-- **Bilingual** — a leaf ES/EN toggle localizes the whole UI (and the example questions); the model already answers in the question's language.
-- **Product touches** — shareable `?q=` links, session history, keyboard shortcuts, a live health dot, a corpus-stats ribbon, live tokens/sec, a real Stop button, copy/export, and 👍/👎 feedback logged server-side.
-- **Designed, not decorated.** A token-driven design system with two OKLCH themes — moonlit *Clair de Lune* (dark) and daylight *Forest* (light), swapped by a single toggle — and a deliberate typographic hierarchy: a serif wordmark, a humanist-sans UI, and a monospace face reserved for every *data* surface (latency, relevance scores, page citations, tier badges). It reads premium because the typography carries the weight, not ornament — and it degrades gracefully to system fonts offline, with hex fallbacks for pre-OKLCH browsers.
-
-The default view stays a calm search box — all of that power reveals only on demand.
+## Deployment: Fully Containerized
 
 ```bash
-# launch the web app (needs Postgres + pgvector and a local Ollama model)
-uv run uvicorn agroteca.api:app --reload
-# then open http://127.0.0.1:8000  ·  auto-generated API docs at /docs
+docker compose up -d
 ```
 
-### Screenshots
+One command builds and starts the full stack — the served API (`api`, GPU-scheduled) and Postgres + pgvector (`db`, health-checked, with a named volume) — from the committed [`docker-compose.yml`](docker-compose.yml) and [`Dockerfile`](Dockerfile). Requires a CUDA-capable host with `nvidia-container-toolkit`; the image's `ENTRYPOINT` runs a GPU preflight (`warmup.py`) before the API process starts, and refuses to start on a misconfigured GPU-less host rather than silently degrading. `AGROTECA_DEVICE=cpu docker compose up -d` or `AGROTECA_DEVICE=auto docker compose up -d` override this for GPU-less smoke testing (see the [warmup determinism note](#deterministic-startup-explicit-model-warmup) above for what that trades away).
 
-<p align="center">
-  <img src="docs/img/hero-drawer.jpg" alt="An Agroteca answer with its Sources & retrieval drawer open: every retrieved chunk shows a governance-tier badge, a cross-encoder relevance score, a page-level citation, and a snippet, alongside a low-confidence flag and a retrieval-vs-generation latency split." width="100%">
-</p>
-
-> **Every answer is a receipt.** The drawer exposes the exact chunks it grounded on — each with a governance-tier badge, a cross-encoder relevance score, a **page-level citation**, and a snippet — plus an honest *weak-match* flag when the top score is low, and a breakdown of where the time went. *Show your work.*
-
-<p align="center">
-  <img src="docs/img/dark.jpg" alt="Agroteca in its moonlit Clair de Lune dark theme, streaming a page-cited answer." width="49%">
-  <img src="docs/img/light.jpg" alt="Agroteca in its daylight Forest light theme." width="49%">
-</p>
-
-> **One app, two themes** — moonlit **Clair de Lune** (dark) and daylight **Forest** (light), a single toggle apart; the data surfaces stay in a monospace face in both.
-
-<p align="center">
-  <img src="docs/img/abstain.jpg" alt="Agroteca's empty-basket abstention state for an out-of-corpus question." width="66%">
-</p>
-
-> When the corpus genuinely can't answer, an honest **empty basket** — never a fabrication.
-
----
-
-## From prototype to service — production hardening
-
-A demo that runs on my laptop and a service a stranger can hit are different objects. Closing that gap meant **standing the server up and running it** — the only way to surface the failures that never appear in a unit test. Each of these was found by reading a real traceback, fixed, and re-verified against the running server:
-
-- **Config-driven models.** The LLM, its host, timeouts, pool size, and ONNX thread count are settings, not code — a deploy swaps the slow local model for a fast hosted one with an env var. *This is the single change that makes the app deployable at all.*
-- **A health-checked connection pool.** The database is reached through a `psycopg` pool that reuses connections and **validates each one on checkout** — after a live run `500`'d on a connection Docker's proxy had silently killed while idle. The stream path releases its pooled connection *before* the minutes-long generation, so a streamed answer never holds the pool hostage.
-- **Guardrails on the public surface.** Bounded input length (a 1 MB "question" can't reach the FTS regex / `tsquery`), `Literal`-validated feedback, and both models **warmed at startup** so concurrent first requests can't each load the 1.1 GB reranker.
-- **A timeout that tells slow from broken.** Fail fast if Ollama is unreachable (10 s connect), but stay patient with legitimately slow CPU generation — a flat timeout punishes the honest slow answer.
-- **Page-precise citations.** The page was already stored per chunk; surfacing it turns `(Book.pdf)` into `(Book.pdf, p. 37)` — verifiable in one click.
-- **A warm-up that made the first request 3× faster.** The first query took **>90 s**, every one after ~25 s: the reranker paid ONNX Runtime's one-time graph optimization on its first *real* inference. Moving that to startup dropped first-request retrieval to **27 s**, measured on the live server.
-- **Containerized, and governance-safe by construction.** A two-stage `uv` Docker build — a dependency layer cached off the committed lockfile, a slim **non-root** runtime, a `/health` healthcheck, models in a cache volume — ships the whole app in one **590 MB** image that both **serves *and* ingests**. The copyrighted tier *physically cannot ship*: the Dockerfile never `COPY`s `data/raw`, so governance holds at the image boundary, not just in config. Ingestion is **idempotent and resumable** (`--resume`), so a multi-hour re-index survives an interruption instead of restarting from zero.
+A fresh database needs its schema and corpus before it can answer anything — two more one-line commands, run once:
 
 ```bash
-# deploy path — same code, a hosted model, only the open corpus:
-AGROTECA_GEN_BASE_URL=https://your-llm-host  AGROTECA_GEN_MODEL=<fast-model> \
-  uv run uvicorn agroteca.api:app --host 0.0.0.0 --port 8000
-# LOCAL_MODE stays off → the copyrighted tier is never served publicly
+# schema
+docker exec -i agroteca-pgvector psql -U postgres -d agroteca < migrations/001_init.sql
+docker exec -i agroteca-pgvector psql -U postgres -d agroteca < migrations/002_tsv_simple.sql
+
+# ingest the deployable corpus (LOCAL_MODE is off in the image; the copyrighted tier never ships)
+docker compose run --rm api python -m agroteca.ingest.run
 ```
 
-> Full recipe — env vars, the generation swap (Ollama-compatible host = env var; another provider = a small localized change), and ops notes — in **[`DEPLOY.md`](DEPLOY.md)**.
+Generation runs against an Ollama-compatible endpoint the API points at (`AGROTECA_GEN_BASE_URL`) — deliberately not itself a compose service; point it at a GPU host you already run, or swap it for a different provider (a small, contained change — see [`DEPLOY.md`](DEPLOY.md)). Model weights for the embedder and reranker are baked into the image at build time (a dedicated build stage runs the same warmup that gates startup, before the final layer is assembled), so a running container has no network dependency for its own inference — only for reaching Postgres and the LLM endpoint, both externally configured.
 
-The loop that produced all of this — run, break, diagnose, fix, re-run — is the difference between a portfolio piece and a product.
+Full recipe, env var reference, and the CPU-vs-GPU cost tradeoff: **[`DEPLOY.md`](DEPLOY.md)**.
 
 ---
 
-## Roadmap
+## API Surface
 
-| Phase | Deliverable | Ship criterion | Status |
-|---|---|---|---|
-| 1 | Golden set + governed corpus + validator | validator passes; corpus tiered & text-verified | ✅ **done** |
-| 2 | Ingestion: normalize → chunk → embed → pgvector + FTS | corpus indexed (10,330 chunks); `retrieval@5` baseline measured | ✅ **done** → 0.35 |
-| 3 | Hybrid retrieval (dense + lexical) fused with RRF | the number moves vs the dense baseline | ✅ **done** → 0.45 |
-| 4 | Cross-encoder reranking (precision stage) | rerank@5 beats hybrid on the golden set | ✅ **done** → 0.75 |
-| 5 | Grounded, **cited**, **abstaining** generation (local LLM) | answers are cited; no-answer questions abstain | ✅ **done** |
-| 6 | Serving: FastAPI + token streaming (NDJSON evidence stream) | a request streams a cited answer end-to-end | ✅ **done** |
-| 7 | Web app: bilingual streaming UI + retrieval-transparency drawer | grounded/cited answer *or* honest abstention, evidence one click away | ✅ **done** |
-| 8 | Production hardening: config-driven models · pooled + health-checked DB · input guardrails · startup warm-up | verified against a live running server | ✅ **done** |
-| 9 | Public URL + write-up | a stranger opens a URL and gets a cited answer | ⏳ a hosting-cost decision |
+| Route | Method | Purpose |
+|---|---|---|
+| `/health` | GET | Liveness; used by the Dockerfile `HEALTHCHECK` |
+| `/stats` | GET | Corpus size (chunks / documents / tiers), one round-trip, no model |
+| `/retrieve` | POST | Retrieval only — hybrid search + rerank, no LLM call. For eval, latency profiling, and integration testing without paying for generation |
+| `/ask/stream` | POST | Full pipeline: retrieval, then an NDJSON stream — a `meta` frame (sources, scores, tiers, retrieval latency) followed by token frames and a `done` frame |
+| `/feedback` | POST | Logs a 👍/👎 vote server-side |
+
+`/retrieve` and `/ask/stream` share one retrieval implementation (`agroteca.generate.retrieve_ranked_async`) — the split exists purely so a retrieval-only caller (an eval harness, a monitoring probe) never pays generation cost or latency.
 
 ---
 
-## Design decisions (and why)
+## Evaluation & Observability
 
-| Choice | Rationale |
-|---|---|
-| **Multilingual MiniLM embeddings** (measured, then *stress-tested*) | cross-lingual questions rule out an English-only model; MiniLM-384 was chosen over e5-large by **measured** CPU throughput (50× faster) — then I **ran the e5-large upgrade end-to-end**: it doubled *dense* recall, but the reranker had been masking that, so the final barely moved. I kept MiniLM and recorded the tradeoff rather than pay 8× query latency + a `VECTOR(1024)` migration for a noise-level gain |
-| **Postgres + pgvector** | metadata filtering, keyword search, and vector search in one store; production-credible; tiers enforced in SQL |
-| **Hybrid + Reciprocal Rank Fusion** | dense search misses exact codes (`WL-323`); lexical search misses paraphrase; fusing by *rank* (not score) sidesteps the incomparable score scales |
-| **Cross-encoder reranker** | reads each (query, chunk) pair *together* to sharpen the top candidates before the LLM — retrieval quality is the ceiling on answer quality |
-| **Local LLM · ground / cite / abstain** | grounded generation with citations and a canonical abstention phrase; rules live in the **system** role to resist prompt injection from retrieved chunks; a local 3B model keeps inference free, offline, and copyrighted chunks on-device |
-| **Config-driven serving** | the model, host, timeouts, pool size, and ONNX thread count are settings, not code — a deploy points at a hosted GPU model (or bounds concurrency) with an env var, no source edit |
-| **Deterministic eval, RAGAS-ready** | deterministic `must_contain` / retrieval@k checks run cheaply and gate every change; semantic faithfulness (RAGAS) is the documented next layer |
-
----
-
-## Repository layout
-
-```
-data/
-  manifest*.csv           # the four governed tiers (open / local / synthetic / distractor)
-  synthetic/              # grounded synthetic reference notes (*.md)
-  raw/                    # source PDFs (gitignored)
-eval/
-  golden_set.jsonl        # 22 hand-verified Q/A pairs
-  validate_golden.py      # structural + tier-membership validator
-  compare_retrievers.py   # dense vs lexical vs hybrid vs rerank, on the golden set
-  eval_generation.py      # abstention + citation + latency on generated answers
-src/agroteca/
-  ingest/                 # extract · normalize · chunk · embed · store
-  retrieve/               # dense · lexical · fusion (RRF) · hybrid · rerank
-  generate.py             # ground / cite / abstain generation (+ NDJSON streaming)
-  api.py                  # FastAPI service: /ask/stream, /stats, /feedback, /health
-  static/index.html       # the self-contained bilingual streaming web app
-stream_client.py          # tiny terminal client for the streaming endpoint
-migrations/               # pgvector + full-text schema
-Dockerfile .dockerignore  # two-stage uv build; one non-root image serves + ingests
-DEPLOY.md                 # deploy recipe: hosted-model swap, LOCAL_MODE, container run
-docs/                     # ingestion spec + teaching notes
-results/                  # measured before/after for each phase
-DATA_GOVERNANCE.md        # the four-tier provenance/licensing policy
-notes.md                  # build journal (the "why", with war stories)
-```
-
-## Running it
-
-Python is managed with **[uv](https://docs.astral.sh/uv/)** (Python 3.12). The retrieval and generation stack needs **Postgres + pgvector** (via Docker) and a local **[Ollama](https://ollama.com)** model for generation.
+- **[`eval/golden_set.jsonl`](eval/golden_set.jsonl)** — 22 hand-verified questions, written before the retriever existed, stratified across factual lookup, exact-term matching, synthesis, cross-lingual (ES↔EN), and deliberately unanswerable cases (abstention testing). Every answerable question's `must_contain` phrase is verified against machine-extracted text, not the source PDF read by eye.
+- **[`eval/validate_golden.py`](eval/validate_golden.py)** — structural + corpus-membership validation of the golden set against the ingested manifests; run before trusting any eval result.
+- **[`eval/compare_retrievers.py`](eval/compare_retrievers.py)** — in-process dense/lexical/hybrid/rerank comparison, `--latency` for per-stage p50/p95, `--open-only` for the deployable-corpus number.
+- **[`eval/eval_pipeline.py`](eval/eval_pipeline.py)** — an HTTP-level, `asyncio`-concurrent harness that fires the golden set at a *live* `/retrieve` endpoint (not an in-process function call), so accuracy and latency are measured the way a real client experiences them — network, ASGI, and connection-pool overhead included. Pydantic-validates the golden set's structure before firing a single request; outputs a Markdown results table.
 
 ```bash
-# 1. evaluation foundation (no services required)
 uv run python eval/validate_golden.py
-
-# 2. compare retrievers on the golden set  (needs Postgres + pgvector, corpus ingested)
-uv run python eval/compare_retrievers.py --k 5
-
-# 3. a grounded, cited answer from the real corpus  (needs Postgres + Ollama)
-uv run python src/agroteca/generate.py
-
-# 4. the full web app  (needs Postgres + pgvector + Ollama)
-uv run uvicorn agroteca.api:app --reload   # then open http://127.0.0.1:8000
+uv run python eval/eval_pipeline.py --base-url http://127.0.0.1:8000
 ```
 
 ---
 
-## Licensing & provenance
+## Corpus Governance
 
-Source documents retain their original licenses. Only open-license / public-domain / government material is served by any public deployment; copyrighted material is confined to the local-only tier and is never redistributed. Chilean official legal texts are public domain (Ley 17.336 art. 88). See [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).
+Every document is assigned to exactly one of four tiers, and the tier — enforced in SQL, not just documentation — controls where it may appear:
+
+| Tier | Loads when | Role |
+|---|---|---|
+| Open / deployable | always | Open-license, government, or public-domain — safe for any public deployment |
+| Local-only | `AGROTECA_LOCAL_MODE=1` only | Copyrighted sources — never ingested or served publicly |
+| Synthetic reference | always | Original, human-verified notes grounded in open sources; cited as synthetic |
+| Distractor | eval only | Deliberate off-topic hard negatives; never a valid answer source |
+
+The Dockerfile enforces this at the image layer, not just at runtime: `data/raw` (the copyrighted tier) is never `COPY`'d into any image, so a public deployment cannot serve it even under a configuration error. Full policy: [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).
 
 ---
 
-*Built as a portfolio project. The interesting parts are the decisions, not the line count.*
+## Configuration Reference
+
+All configuration is environment-driven (`AGROTECA_` prefix), read once at process start — no source edits for a deploy. Selected knobs most relevant to infrastructure planning:
+
+| Env var | Default | Effect |
+|---|---|---|
+| `AGROTECA_DB_URL` | local dev Postgres | Connection string for the async pool |
+| `AGROTECA_DEVICE` | `cuda` | `cuda` (fail-fast if unavailable) / `cpu` (explicit, slow) / `auto` (resolve at startup, opts out of fail-fast) |
+| `AGROTECA_LOCAL_MODE` | `0` | Keep `0` for any public-facing deployment — gates the copyrighted tier |
+| `AGROTECA_GEN_BASE_URL` / `AGROTECA_GEN_MODEL` | local Ollama | Swap generation to any Ollama-compatible host, or a different provider entirely |
+| `AGROTECA_RERANK_CANDIDATES` | `20` | Reranker pool size — the main lever on rerank latency |
+| `AGROTECA_TRANSLATE_QUERIES` | `true` | Bilingual query translation for cross-lingual retrieval; fails soft to original-only |
+
+Full table: [`DEPLOY.md`](DEPLOY.md).
+
+---
+
+## Repository Layout
+
+```
+src/agroteca/
+  ingest/           # extract · normalize · chunk · embed · store
+  retrieve/         # dense · lexical · fusion (RRF) · hybrid · rerank (sync + async)
+  generate.py        # ground / cite / abstain generation; retrieval-only phase shared with /retrieve
+  api.py             # FastAPI service and its async connection-pool DI
+  warmup.py          # explicit model warmup / the AGROTECA_DEVICE fail-fast gate
+  torch_runtime.py    # single dedicated worker thread for torch inference calls
+migrations/          # pgvector + full-text schema
+eval/                # golden set, validators, in-process and live-HTTP eval harnesses
+data/                # governed-tier manifests, synthetic notes, raw sources (gitignored)
+Dockerfile, docker-compose.yml, docker-entrypoint.sh   # the containerized deployment
+DEPLOY.md            # full deploy recipe, env var reference, CPU/GPU cost tradeoff
+DATA_GOVERNANCE.md   # the four-tier provenance/licensing policy
+results/, eval/results.csv   # measured results backing every claim above
+```
+
+---
+
+## Licensing & Provenance
+
+Source documents retain their original licenses. Only open-license, government, or public-domain material is served by any public deployment; copyrighted material is confined to the local-only tier and is never redistributed. See [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).

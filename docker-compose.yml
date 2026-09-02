@@ -15,5 +15,35 @@ services:
       timeout: 3s
       retries: 10
 
+  # The served API (see Dockerfile). Needs a GPU + nvidia-container-toolkit on the host --
+  # AGROTECA_DEVICE=cuda is the image default and warmup.py refuses to start without one.
+  # `AGROTECA_DEVICE=cpu docker compose up` overrides it for a GPU-less run (much slower --
+  # see DEPLOY.md's measured CPU numbers -- but a real, working path for local smoke-testing).
+  api:
+    build: .
+    container_name: agroteca-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # `db` resolves via Docker's internal network on its container port (5432), not the
+      # host-mapped 5433 above.
+      AGROTECA_DB_URL: postgresql://postgres:agroteca@db:5432/agroteca
+      AGROTECA_DEVICE: ${AGROTECA_DEVICE:-cuda}
+      # Ollama is deliberately NOT a service here (DEPLOY.md): point it at wherever you're
+      # actually running/hosting it. Default assumes Ollama on the Docker host itself.
+      AGROTECA_GEN_BASE_URL: ${AGROTECA_GEN_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # makes the default above resolve on Linux too
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   pgdata: {}
