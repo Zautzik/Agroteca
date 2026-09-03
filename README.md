@@ -22,7 +22,7 @@ Retrieval@5 (defined precisely in [Benchmark Results](#benchmark-results-measure
 
 ### Concurrency: `psycopg_pool.AsyncConnectionPool`
 
-The served API holds one process-lifetime `psycopg_pool.AsyncConnectionPool` (`min_size=5, max_size=20, timeout=30.0`), opened in the FastAPI `lifespan` and injected into every route via a `Depends(get_conn)` dependency — routes never touch the pool object directly, and never manage checkout/checkin themselves:
+The served API holds one process-lifetime `psycopg_pool.AsyncConnectionPool` (`min_size=5, max_size=20, timeout=30.0`), opened in the FastAPI `lifespan`. `/stats` and `/retrieve` take a connection through a `Depends(get_conn)` dependency — a route asks for a connection, it never touches the pool object:
 
 ```python
 async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
@@ -33,7 +33,9 @@ async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
 Two properties this buys, both load-bearing under concurrent load rather than incidental:
 
 - **Checkout is non-blocking.** An `AsyncConnectionPool` awaits a free connection instead of blocking a worker thread, so concurrent requests queue on the pool's own scheduler, not on OS threads. Each connection is validated on checkout (`check=AsyncConnectionPool.check_connection`) and transparently replaced if a proxy — a Docker port-forward, a managed-Postgres load balancer — silently dropped it while idle.
-- **A connection is held only for retrieval, never for generation.** `/ask/stream`'s dependency releases the checked-out connection as soon as the route coroutine returns — *before* the token-streaming response body is iterated — so a slow (potentially multi-second) LLM generation never holds a pooled DB connection hostage. This is enforced by FastAPI's own dependency-teardown ordering, not a manual `finally` block.
+- **A connection is held only for retrieval, never for generation.** `/ask/stream` deliberately does *not* use `Depends(get_conn)` — it checks out a connection manually, inside its own response generator, and releases it (an explicit `async with`) before the connection-free generation phase runs. That's not a style choice; it's the fix for a real bug (below).
+
+**`/ask/stream`'s streaming design, and the bug that shaped it.** The original version *did* use `Depends(get_conn)`: retrieve using the injected connection, then construct and return `StreamingResponse`. That's a defect — Starlette sends the ASGI response's headers as soon as the response object exists, before it iterates the body. With retrieval running first, the client received zero bytes, not even a status line, for the entire CPU-bound retrieval phase (which can run into minutes). Browsers apply a materially stricter time-to-first-byte timeout than they do to an already-open, slow stream, and that's what fired — found by an actual user hitting the deployed app, not by our own test suite, which never sat in that failure window long enough to trip it. The fix: retrieval now runs *inside* the response's own async generator, so `StreamingResponse` returns — and headers flush — immediately, while the connection checkout/release still brackets only the retrieval portion. Verified directly: a short-timeout `curl` shows `200 OK` with full headers in well under a second, then correctly times out waiting on the still-slow body.
 
 A platform-specific correctness note, found by testing, not assumed: on Windows, `asyncio`'s default `ProactorEventLoop` cannot run psycopg's async driver at all (a hard third-party incompatibility, not a config issue) — the serving process requires a selector-based event loop.
 
@@ -111,7 +113,7 @@ Full recipe, env var reference, and the CPU-vs-GPU cost tradeoff: **[`DEPLOY.md`
 | `/health` | GET | Liveness; used by the Dockerfile `HEALTHCHECK` |
 | `/stats` | GET | Corpus size (chunks / documents / tiers), one round-trip, no model |
 | `/retrieve` | POST | Retrieval only — hybrid search + rerank, no LLM call. For eval, latency profiling, and integration testing without paying for generation |
-| `/ask/stream` | POST | Full pipeline: retrieval, then an NDJSON stream — a `meta` frame (sources, scores, tiers, retrieval latency) followed by token frames and a `done` frame |
+| `/ask/stream` | POST | Full pipeline: an NDJSON stream — `progress` frames (`translating` / `reranking` / `generating`, backing the UI's stepping-stones indicator) interleaved with a `meta` frame (sources, scores, tiers, retrieval latency), then token frames and a `done` frame |
 | `/feedback` | POST | Logs a 👍/👎 vote server-side |
 
 `/retrieve` and `/ask/stream` share one retrieval implementation (`agroteca.generate.retrieve_ranked_async`) — the split exists purely so a retrieval-only caller (an eval harness, a monitoring probe) never pays generation cost or latency.
@@ -176,6 +178,7 @@ src/agroteca/
   torch_runtime.py    # single dedicated worker thread for torch inference calls
 migrations/          # pgvector + full-text schema
 eval/                # golden set, validators, in-process and live-HTTP eval harnesses
+scripts/             # one-off ops scripts (e.g. the resumable e5-large re-index driver)
 data/                # governed-tier manifests, synthetic notes, raw sources (gitignored)
 Dockerfile, docker-compose.yml, docker-entrypoint.sh   # the containerized deployment
 DEPLOY.md            # full deploy recipe, env var reference, CPU/GPU cost tradeoff

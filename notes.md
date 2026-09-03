@@ -1,6 +1,6 @@
 # I Wrote the Final Exam Before I Built the Student
 
-> **The 60-second version.** A six-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus; **Part 2** the measured retrieval + generation engine; **Part 3** the streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic; **Part 5** runs the embedder upgrade as a controlled experiment — and lets it *disprove my own hypothesis*; **Part 6** rebuilds serving for real concurrency and GPU inference, then spends a day chasing a 20× slowdown that turns out not to be the bug anyone — including me — first assumed. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong — and read the source before you rewrite it.*
+> **The 60-second version.** A seven-part build journal of an eval-first, bilingual agricultural RAG. I wrote the evaluation *before* the retriever, then measured every change: retrieval@5 climbed **0.35 → 0.45 → 0.75** (dense → hybrid → cross-encoder reranked). Answers are grounded in cited sources — or honestly abstain — and along the way the system's own eval caught a *mislabeled* ground-truth answer. **Part 1** builds the governed corpus; **Part 2** the measured retrieval + generation engine; **Part 3** the streaming, transparent web app; **Part 4** hardens it into a service that survives real traffic; **Part 5** runs the embedder upgrade as a controlled experiment — and lets it *disprove my own hypothesis*; **Part 6** rebuilds serving for real concurrency and GPU inference, then spends a day chasing a 20× slowdown that turns out not to be the bug anyone — including me — first assumed; **Part 7** ships that work to an actual person, who finds two real bugs my own testing never had — and gets honest, backend-driven progress feedback out of the debugging session as a result. The through-line: *measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong, read the source before you rewrite it — and your own testing is not the same test as someone else using the thing.*
 
 ### Notes from building an eval-first agricultural RAG — Part 1: the foundation nobody blogs about
 
@@ -366,5 +366,45 @@ I also caught myself before writing a lie into public documentation. Asked to wr
 Six posts in now. The student sat an exam it hadn't taken yet, climbed 0.35 to 0.75, caught its own examiner in a lie, learned to stream and to say "I don't know," survived its first strangers, and tested its best idea hard enough to find out the idea was half wrong. This post it got faster hardware and slower answers at the same time, chased its own plausible-sounding fix into a dead end, and only found the real story by feeding the benchmark what production actually sees.
 
 The judgments, extended one more time: measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong — and, the one this post earned, **read the source before you rewrite it.** A fix that doesn't move the number isn't a fix. Go find out why.
+
+That was always the point.
+
+---
+
+# Zero Bytes
+
+### Notes from building an eval-first agricultural RAG — Part 7: the bug I only found because someone else clicked the button
+
+I'd tested the async pivot from Part 6 thoroughly — curl, pytest, a full live round trip that streamed a correct answer end to end. I called it verified and said so. Then someone else opened the app in their own browser, asked a real question, and got a flat "network error" before anything happened at all. My own testing hadn't found this. Theirs did, on the first try.
+
+## The bug my own tests couldn't see
+
+Here's the uncomfortable part: my test *had* exercised the exact code path that broke. It just never sat in the failure window long enough to notice, because I was watching a terminal, not a browser tab, and I was patient in a way a real user reasonably isn't.
+
+The actual defect: `/ask/stream` awaited the *entire* retrieval phase — hybrid search, cross-encoder rerank, all of it — before it ever constructed the response object. Which meant the client received *nothing*. Not a slow trickle of bytes. Not even the HTTP status line. Total silence for however long retrieval took, which on CPU is now measured in minutes, not seconds. A browser watching an open socket that's actively streaming data will wait quite patiently. A browser watching a socket that hasn't sent one byte since the request left — including no headers — applies a much shorter leash. That's the exact, measured line between "slow" and "broken," and my own tests had never actually stood on the wrong side of it long enough to trip it.
+
+The fix was to stop doing the slow work *before* handing Starlette a response, and start doing it *inside* the response — so headers flush the instant the request lands, and the client is watching a live, open stream from the first millisecond, even though the real content is still minutes away. Concretely: retrieval, including the pooled database connection, now lives inside the async generator that streams the reply, not in the route handler above it. That meant the generation half had to stop blocking the event loop too, since the whole thing was now one coroutine end to end — so I moved it onto `ollama`'s async client instead of the sync one, without touching the CLI and eval code that still use the sync client correctly on its own thread.
+
+I verified the mechanism directly rather than trusting the fix by feel: a ten-second curl now shows a `200 OK` with full headers arriving in a fraction of a second, then times out waiting on the body — exactly the shape a slow-but-alive stream should have, and precisely what was missing before.
+
+## The second bug, found the same way
+
+I shipped that, told the user to try the app again, and they did. New failure: a different "network error," further into the wait this time. Same instinct as before — check before assuming — and the traceback said something specific: Ollama's own read timeout, 300 seconds, had fired mid-generation. Not a regression of the first fix. A second, independent bug, in the part of the pipeline the first fix hadn't touched at all.
+
+The reasoning here is the same discipline as the reranker investigation in Part 6, compressed: don't assume a new symptom is the old bug wearing a different hat. Read what actually broke. The 300-second number had been chosen when a full round trip took minutes; now the reranker alone was taking longer than that. The timeout hadn't gotten wrong — the ground it was measured against had moved out from under it. I raised it to match the CPU-tier costs actually measured this session, not the ones assumed when the number was first picked.
+
+There was a third, smaller thing hiding in the same debugging session, worth naming because it's the kind of failure that erodes trust quietly: I edited a config value, uvicorn's `--reload` printed "Reloading...", and I believed it. Two hours later I checked the actual process start time and found the *original* worker, unrestarted, still serving requests with the stale config the whole time. The log said one thing; the running system did another. **A log line claiming success is a claim, not a fact — check the thing itself, not its own report about itself.**
+
+## Building the fix the user actually asked for
+
+Once both bugs were closed, the user asked a fair question: is ten-plus minutes of a bare elapsed-seconds counter really the experience I want to ship? No. So I built real progress feedback — but grounded in what the backend can honestly report, not a fabricated percentage. The reranker scores its whole candidate pool in a single batched pass; there's no "7 of 20 done" to report without breaking the batching that makes it fast in the first place. What *does* exist are real phase boundaries: translating, reranking, generating. So the server now emits a frame at each one, and the front end — which already had a purely decorative seed-to-fruit growth animation looping the whole time anyway — turned that same imagery into an actual path: each stone lights up on a real signal from the server, not a timer. A stage the backend skips, like translation when it's turned off, just never lights and quietly counts as passed once a later one lands, so nothing looks stuck that was only ever supposed to be skipped.
+
+I didn't wait through a full multi-minute cycle to prove it worked, because I didn't need to: the first real progress frame — reranking — fires within seconds of submission, before the slow part even starts. That was enough to submit a real question, watch the second stone light up green in a live screenshot, and know the wiring was correct without spending twenty more minutes finding out.
+
+## The arc, one chapter further
+
+Seven posts in. The student sat an exam before it existed, climbed the numbers, caught its own examiner in a lie, learned to stream and to abstain, survived strangers, tested its best idea into a partial failure, and got faster hardware at the cost of a debugging afternoon. This post, someone else — not me — was the one who actually found what was broken, twice, just by using the thing normally. Both times the fix came from reading exactly what failed instead of assuming I already knew.
+
+One more judgment for the list: measure before you build, distrust your own metrics, show your work, know when to say "I don't know," run it before you believe it, run the experiment that can prove you wrong, read the source before you rewrite it — and, the one this post earned, **your own testing is not the same test as someone else actually using the thing.** I'd verified the fix. It was still someone else's first click that found what I'd missed.
 
 That was always the point.

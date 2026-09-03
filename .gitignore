@@ -14,3 +14,12 @@ __pycache__/
 data/raw/
 *.db
 feedback.jsonl
+
+# Personal study material -- rebuild_challenges.md says it plainly: "keep it out of the
+# portfolio ... it's for you, not employers." The practice_*.py files are its exercises;
+# career-roadmap.md is personal career planning, not project documentation. Kept on disk,
+# just never tracked/pushed.
+/docs/career-roadmap.md
+/docs/rebuild_challenges.md
+/practice_*.py
+/practice_*.zip
