@@ -10,7 +10,12 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
 from agroteca.config import settings
-from agroteca.generate import prepare_ndjson_async, retrieve_ranked_async, stream_ndjson
+from agroteca.generate import (
+    build_meta_and_context,
+    retrieve_ranked_async,
+    retrieve_ranked_with_progress,
+    stream_ndjson_async,
+)
 from agroteca.ingest import store
 from agroteca.warmup import load_and_warm
 
@@ -130,16 +135,42 @@ async def retrieve(payload: Question, conn: AsyncConnection = Depends(get_conn))
 
 
 @app.post("/ask/stream")
-async def ask_stream(payload: Question, conn: AsyncConnection = Depends(get_conn)):
+async def ask_stream(payload: Question, request: Request):
     """Stream the answer as NDJSON: meta (sources + scores + tiers + timing), then token
-    frames, then a done frame. The injected connection is used only for retrieval, then
-    returned to the pool (via the get_conn dependency's teardown, once this coroutine
-    returns) BEFORE the StreamingResponse body -- the connection-free generation stream --
-    is actually iterated."""
-    meta_line, context = await prepare_ndjson_async(conn, payload.question)
+    frames, then a done frame.
 
-    def gen():
+    Retrieval -- including the pooled-connection checkout -- happens INSIDE the generator,
+    not before StreamingResponse is constructed. That matters: Starlette sends the ASGI
+    response's status+headers as soon as StreamingResponse is returned, before it starts
+    iterating the body. If retrieval instead ran in the route handler first (the earlier
+    design), the client got zero bytes -- not even headers -- for the whole CPU-bound
+    retrieval phase (which can run into minutes on CPU). Browsers apply a much stricter
+    "time to first byte" timeout than they do to a slow-but-already-started stream, and this
+    was the literal, measured cause of a client-side "network error" firing well before the
+    backend ever responded. Moving retrieval into the generator means headers flush
+    immediately and the browser sees an open, live stream from the first instant, even
+    though the first real frame is still minutes away on CPU.
+
+    The pooled connection is held only for the `async with` block (retrieval), then released
+    before the connection-free generation phase runs.
+
+    Also emits `{"type": "progress", "stage": ...}` frames at each real phase boundary
+    (translating / reranking / generating) -- CPU retrieval alone can now run into the tens
+    of minutes, and a bare elapsed-seconds counter gives a waiting user no sense of whether
+    anything is actually happening. See agroteca.generate.retrieve_ranked_with_progress for
+    why the granularity stops at phase boundaries rather than a fabricated percentage.
+    """
+    async def gen():
+        async with request.app.state.pool.connection() as conn:
+            async for kind, value in retrieve_ranked_with_progress(conn, payload.question):
+                if kind == "progress":
+                    yield json.dumps({"type": "progress", "stage": value}) + "\n"
+                else:
+                    rows, meta, retrieval_ms, translated = value
+        meta_line, context = build_meta_and_context(rows, meta, retrieval_ms, translated)
         yield meta_line
-        yield from stream_ndjson(payload.question, context)
+        yield json.dumps({"type": "progress", "stage": "generating"}) + "\n"
+        async for line in stream_ndjson_async(payload.question, context):
+            yield line
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")

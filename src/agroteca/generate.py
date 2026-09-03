@@ -3,7 +3,7 @@ import json
 import time
 
 import httpx
-from ollama import Client
+from ollama import AsyncClient, Client
 
 from agroteca.config import settings
 from agroteca.ingest import store
@@ -22,6 +22,11 @@ from agroteca.retrieve.translate import translate_query
 # config knobs, so a deploy swaps to a hosted/smaller model via env vars, not source edits.
 _client = Client(host=settings.gen_base_url,
                  timeout=httpx.Timeout(settings.gen_timeout, connect=10.0))
+# Async twin, for the FastAPI serving path -- see stream_ndjson_async. Keeping both (rather
+# than routing the sync CLI/eval path through the async client) means /ask/stream never blocks
+# the event loop on Ollama I/O, without touching the sync call sites below.
+_async_client = AsyncClient(host=settings.gen_base_url,
+                            timeout=httpx.Timeout(settings.gen_timeout, connect=10.0))
 _GEN_OPTS = {"num_predict": settings.gen_num_predict}
 
 SYSTEM_PROMPT = """You are an agronomy assistant. Answer the QUESTION using ONLY the CONTEXT chunks provided.
@@ -179,12 +184,10 @@ async def retrieve_ranked_async(conn, question: str, k: int = 5):
     return rows, meta, retrieval_ms, translated
 
 
-async def prepare_ndjson_async(conn, question: str, k: int = 5) -> tuple[str, str]:
-    """Async twin of prepare_ndjson, for a route holding an injected AsyncConnection. Same
-    contract: returns (meta_line, context) so the caller can let the connection go back to
-    the pool (via FastAPI's Depends teardown) before the DB-free generation stream starts."""
-    rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, question, k)
-
+def build_meta_and_context(rows, meta, retrieval_ms, translated) -> tuple[str, str]:
+    """Turn raw retrieve_ranked_async(_with_progress) results into the NDJSON meta_line and
+    the LLM's context block. Shared by prepare_ndjson_async and the progress-reporting
+    /ask/stream path, so the two never drift on how a `meta` frame is built."""
     sources = [
         {"source": sf, "tier": meta.get(cid, ("?", None))[0], "page": meta.get(cid, ("?", None))[1],
          "score": round(sc, 3), "snippet": text.strip()[:240]}
@@ -195,6 +198,45 @@ async def prepare_ndjson_async(conn, question: str, k: int = 5) -> tuple[str, st
     pages = {cid: meta.get(cid, ("?", None))[1] for (cid, sf, text, sc) in rows}
     context = format_context([(cid, sf, text) for (cid, sf, text, _s) in rows], pages)
     return meta_line, context
+
+
+async def prepare_ndjson_async(conn, question: str, k: int = 5) -> tuple[str, str]:
+    """Async twin of prepare_ndjson, for a route holding an injected AsyncConnection. Same
+    contract: returns (meta_line, context) so the caller can let the connection go back to
+    the pool (via FastAPI's Depends teardown) before the DB-free generation stream starts."""
+    rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, question, k)
+    return build_meta_and_context(rows, meta, retrieval_ms, translated)
+
+
+async def retrieve_ranked_with_progress(conn, question: str, k: int = 5):
+    """Async-generator twin of retrieve_ranked_async for the /ask/stream progress UI: yields
+    ("progress", stage) events at each real phase boundary, then a final ("result", payload)
+    event with the same (rows, meta, retrieval_ms, translated) tuple retrieve_ranked_async
+    returns.
+
+    Stage granularity matches actual architecture boundaries -- translating, then reranking
+    (hybrid search + the cross-encoder together: hybrid is sub-second, so splitting it out as
+    its own stage would flash by unnoticed and only add a stage the UI has to handle for no
+    real signal). Finer-grained progress *within* reranking (e.g. "candidate 7/20") isn't
+    available without abandoning the reranker's single batched forward pass, which is what
+    keeps it as fast as it currently is (see agroteca.retrieve.rerank) -- so this reports
+    real phase transitions, not a fabricated percentage.
+    """
+    t0 = time.perf_counter()
+    translated = None
+    if settings.translate_queries:
+        yield ("progress", "translating")
+        translated = await asyncio.to_thread(translate_query, question)
+
+    yield ("progress", "reranking")
+    if translated:
+        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k)
+    else:
+        rows = await rerank_scored_async(conn, question, k=k)
+
+    meta = await _meta_for_async(conn, [r[0] for r in rows])
+    retrieval_ms = int((time.perf_counter() - t0) * 1000)
+    yield ("result", (rows, meta, retrieval_ms, translated))
 
 
 def stream_ndjson(question: str, context: str):
@@ -211,6 +253,27 @@ def stream_ndjson(question: str, context: str):
         options=_GEN_OPTS,
     )
     for chunk in stream:
+        piece = chunk["message"]["content"]
+        if piece:
+            yield json.dumps({"type": "token", "text": piece}) + "\n"
+    yield json.dumps({"type": "done", "generation_ms": int((time.perf_counter() - g0) * 1000)}) + "\n"
+
+
+async def stream_ndjson_async(question: str, context: str):
+    """Async twin of stream_ndjson, for the FastAPI serving path: yield token frames, then a
+    done frame, via ollama.AsyncClient so generation never blocks the event loop."""
+    user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
+    g0 = time.perf_counter()
+    stream = await _async_client.chat(
+        model=settings.gen_model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        stream=True,
+        options=_GEN_OPTS,
+    )
+    async for chunk in stream:
         piece = chunk["message"]["content"]
         if piece:
             yield json.dumps({"type": "token", "text": piece}) + "\n"

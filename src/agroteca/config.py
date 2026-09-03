@@ -66,7 +66,13 @@ class Settings(BaseSettings):
     # AGROTECA_GEN_MODEL / AGROTECA_GEN_BASE_URL — no source edits (7 min on CPU is unservable).
     gen_model: str = "qwen2.5:3b"
     gen_base_url: str = "http://localhost:11434"   # Ollama host
-    gen_timeout: float = 300.0                     # read timeout (s): generous for slow CPU first-token; a hosted model can lower it
+    # read timeout (s), i.e. max gap between streamed chunks -- not a total-request timeout.
+    # 300s was calibrated against the OLD ONNX-backed retrieval story; it's too short now that
+    # CPU prefill on the ~2800-token RAG prompt alone can exceed it (measured: a real generation
+    # request hit this exact timeout mid-stream on CPU, aborting a request that was working, not
+    # hung). 1800s matches the CPU-tier costs measured elsewhere in this pipeline post-GPU-pivot.
+    # A hosted/GPU model can lower this back down -- it's a config knob, not a code change.
+    gen_timeout: float = 1800.0
     gen_num_predict: int = 1024                    # cap output tokens (runaway-generation guard)
 
     # --- query translation (serving-side cross-lingual lever) ---
