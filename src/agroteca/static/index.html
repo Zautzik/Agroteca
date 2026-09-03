@@ -153,9 +153,24 @@
   .src-page { color: var(--muted); font-family: var(--mono); font-weight: 600; font-size: 11px; }
 
   .loading { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 0 8px; }
-  .sprout { font-size: 48px; line-height: 1; display: inline-block; animation: sproutPop 1.1s ease-in-out infinite; }
   @keyframes sproutPop { 0% { transform: scale(.55) translateY(6px); opacity: .5; } 38% { transform: scale(1.2) translateY(-2px); } 100% { transform: scale(1) translateY(0); opacity: 1; } }
   .loading-text { color: var(--muted); font-style: italic; font-size: 14.5px; }
+
+  /* stepping-stones progress: one stone per real backend phase (see /ask/stream's `progress`
+     frames) -- past stones settle solid, the current one is the one still "growing" (reuses
+     sproutPop), future stones stay dim. A skipped stage (e.g. translation disabled) is simply
+     never lit and gets marked done along with everything before the stage that follows it. */
+  .stones { display: flex; align-items: flex-end; justify-content: center; }
+  .stone { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 52px; opacity: .32; transition: opacity .35s ease; }
+  .stone-icon { font-size: 26px; line-height: 1; filter: grayscale(1) contrast(.7); transition: filter .35s ease; }
+  .stone.done { opacity: .7; }
+  .stone.done .stone-icon { filter: grayscale(.15); }
+  .stone.active { opacity: 1; }
+  .stone.active .stone-icon { filter: grayscale(0); animation: sproutPop 1.1s ease-in-out infinite; }
+  .stone-label { font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .stone.active .stone-label { color: var(--accent); font-weight: 600; }
+  .stone-path { width: 20px; height: 2px; border-radius: 2px; background: var(--border); margin: 0 -4px 19px; transition: background .35s ease; }
+  .stone-path.done { background: var(--accent); }
   .streamstats { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .stopbtn { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; font-family: inherit; transition: color .15s, border-color .15s; }
   .stopbtn:hover { color: var(--accent); border-color: var(--accent); }
@@ -244,8 +259,9 @@
     es: {
       tagline: 'Respuestas agronómicas <em>con cita</em> — o un honesto "no lo sé".',
       ask: 'Preguntar',
-      hint: 'Ctrl+Enter enviar · / enfocar · ? atajos · ~1–2 min (CPU local)',
+      hint: 'Ctrl+Enter enviar · / enfocar · ? atajos · en CPU puede tardar varios minutos',
       loading: 'Consultando el corpus…',
+      stageLabels: { seed: 'Enviado', translating: 'Traduciendo', reranking: 'Comparando', generating: 'Generando', done: 'Listo' },
       footer: 'Local · sin nube · fundado en un corpus curado y gobernado por licencia.',
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
       grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar', share: 'Enlace', shareCopied: 'Enlace copiado',
@@ -265,8 +281,9 @@
     en: {
       tagline: 'Agronomy answers <em>with citations</em> — or an honest "I don\'t know".',
       ask: 'Ask',
-      hint: 'Ctrl+Enter send · / focus · ? shortcuts · ~1–2 min (local CPU)',
+      hint: 'Ctrl+Enter send · / focus · ? shortcuts · can take several minutes on CPU',
       loading: 'Searching the corpus…',
+      stageLabels: { seed: 'Sent', translating: 'Translating', reranking: 'Reranking', generating: 'Generating', done: 'Done' },
       footer: 'Local · no cloud · grounded in a curated, license-governed corpus.',
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
       grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export', share: 'Link', shareCopied: 'Link copied',
@@ -446,10 +463,32 @@
   pollHealth(); setInterval(pollHealth, 20000);
   fetch('/stats').then(r => r.json()).then(s => { statsData = s; renderStats(); }).catch(() => {});
 
-  /* ---------- the life-cycle reel ---------- */
-  const SPROUT = ['🌰', '🌱', '🌿', '🌸', '🍎'];
-  let sproutTimer = null, abortCtrl = null, elapsedTimer = null;
-  function stopSprout() { if (sproutTimer) { clearInterval(sproutTimer); sproutTimer = null; } }
+  /* ---------- the life-cycle reel, now a real progress path ---------- */
+  // Each stone is a real /ask/stream phase (see agroteca.generate.retrieve_ranked_with_progress);
+  // 'seed' just marks "request sent" before the first progress frame arrives. A stage the
+  // backend never visits (e.g. 'translating' when AGROTECA_TRANSLATE_QUERIES=false) is simply
+  // never lit -- setStage marks everything BEFORE the reached stage 'done', so a skipped one
+  // settles quietly rather than looking stuck.
+  const STAGES = ['seed', 'translating', 'reranking', 'generating', 'done'];
+  const STAGE_ICON = { seed: '🌰', translating: '🌱', reranking: '🌿', generating: '🌸', done: '🍎' };
+  let abortCtrl = null, elapsedTimer = null;
+
+  function stonesHTML() {
+    const labels = I18N[currentLang].stageLabels;
+    return '<div class="stones" aria-hidden="true">' + STAGES.map((s, i) =>
+      (i > 0 ? '<div class="stone-path" data-i="' + i + '"></div>' : '')
+      + '<div class="stone" data-stage="' + s + '"><span class="stone-icon">' + STAGE_ICON[s] + '</span>'
+      + '<span class="stone-label">' + labels[s] + '</span></div>'
+    ).join('') + '</div>';
+  }
+  function setStage(stageName) {
+    const idx = STAGES.indexOf(stageName);
+    if (idx < 0) return;
+    const stones = answer.querySelectorAll('.stone');
+    if (!stones.length) return;
+    stones.forEach((el, i) => { el.classList.toggle('done', i < idx); el.classList.toggle('active', i === idx); });
+    answer.querySelectorAll('.stone-path').forEach(el => el.classList.toggle('done', idx >= parseInt(el.dataset.i, 10)));
+  }
 
   async function run() {
     const question = q.value.trim();
@@ -461,15 +500,13 @@
     const startT = Date.now();
 
     answer.className = 'answer show';
-    answer.innerHTML = '<div class="loading"><div class="sprout" aria-hidden="true">🌰</div>'
+    answer.innerHTML = '<div class="loading">' + stonesHTML()
       + '<div class="loading-text">' + I18N[currentLang].loading + ' <span id="elapsed">0s</span></div>'
       + '<button class="stopbtn" id="stop"></button></div>';
     answer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     { const s = document.getElementById('stop'); s.textContent = I18N[currentLang].stopLabel; s.onclick = () => abortCtrl.abort(); }
+    setStage('seed');
 
-    const sproutEl = answer.querySelector('.sprout');
-    let frame = 0; stopSprout();
-    sproutTimer = setInterval(() => { frame = (frame + 1) % SPROUT.length; sproutEl.textContent = SPROUT[frame]; }, 1100);
     clearInterval(elapsedTimer);
     elapsedTimer = setInterval(() => { const el = document.getElementById('elapsed'); if (el) el.textContent = ((Date.now() - startT) / 1000).toFixed(0) + 's'; }, 500);
 
@@ -490,11 +527,13 @@
           const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
           if (!line) continue;
           let msg; try { msg = JSON.parse(line); } catch (_) { continue; }
-          if (msg.type === 'meta') {
+          if (msg.type === 'progress') {
+            setStage(msg.stage);
+          } else if (msg.type === 'meta') {
             meta = msg;
           } else if (msg.type === 'token') {
             if (!streamEl) {
-              stopSprout(); firstT = Date.now();
+              firstT = Date.now();
               answer.innerHTML = '<div class="streamstats" id="stats"><span id="statstext"></span><button class="stopbtn" id="stop2"></button></div>'
                 + '<div class="answer-main"><span class="answer-text" id="stream"></span><span class="cursor"></span></div>' + renderSources(meta);
               streamEl = document.getElementById('stream'); statTextEl = document.getElementById('statstext');
@@ -521,7 +560,7 @@
         if (main) main.insertAdjacentHTML('beforeend', note); else answer.innerHTML = note;
       } else { answer.textContent = I18N[currentLang].error(e.message); }
     } finally {
-      stopSprout(); clearInterval(elapsedTimer); ask.disabled = false; abortCtrl = null;
+      clearInterval(elapsedTimer); ask.disabled = false; abortCtrl = null;
     }
   }
 
