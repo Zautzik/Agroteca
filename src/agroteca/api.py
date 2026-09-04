@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,6 +18,7 @@ from agroteca.generate import (
     stream_ndjson_async,
 )
 from agroteca.ingest import store
+from agroteca.torch_runtime import TorchWorkerBusy
 from agroteca.warmup import load_and_warm
 
 
@@ -42,6 +44,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agroteca", lifespan=lifespan)
 STATIC = Path(__file__).parent / "static"
 FEEDBACK_LOG = settings.root / "feedback.jsonl"
+# feedback() is a sync route, so FastAPI dispatches concurrent calls onto DIFFERENT threadpool
+# threads. Nothing in the stdlib guarantees an open("a") + write() from independent threads
+# never interleaves mid-line -- a lock costs nothing on a request this infrequent and removes
+# the question entirely.
+_FEEDBACK_LOCK = threading.Lock()
 
 
 async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
@@ -102,7 +109,7 @@ def feedback(fb: Feedback):
     """Append a thumbs-up/down to a JSONL log — the seed of a feedback loop."""
     rec = {"ts": time.time(), "vote": fb.vote,
            "question": fb.question, "answer_preview": fb.answer_preview[:200]}
-    with open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
+    with _FEEDBACK_LOCK, open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return {"ok": True}
 
@@ -125,7 +132,10 @@ async def retrieve(payload: Question, conn: AsyncConnection = Depends(get_conn))
     (e.g. eval/eval_pipeline.py) so measuring retrieval accuracy/latency doesn't pay for a full
     CPU/GPU generation call per query -- /ask/stream bundles both and would badly pollute a
     latency measurement meant to isolate retrieval."""
-    rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, payload.question)
+    try:
+        rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, payload.question)
+    except TorchWorkerBusy as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=503)
     sources = [
         RetrievedChunk(chunk_id=cid, source_file=sf, tier=meta.get(cid, ("?", None))[0],
                        page=meta.get(cid, ("?", None))[1], score=round(sc, 4), text=text)
@@ -159,14 +169,25 @@ async def ask_stream(payload: Question, request: Request):
     of minutes, and a bare elapsed-seconds counter gives a waiting user no sense of whether
     anything is actually happening. See agroteca.generate.retrieve_ranked_with_progress for
     why the granularity stops at phase boundaries rather than a fabricated percentage.
+
+    If the dedicated torch worker is already saturated (agroteca.torch_runtime.TorchWorkerBusy
+    -- see that module for why this can happen even from a single disconnected client), the
+    rejection can't be an HTTP status code: by the time reranking runs, StreamingResponse has
+    already returned and Starlette has already sent a 200. It surfaces as a terminal `error`
+    NDJSON frame instead, so the client's parser gets an explicit end state instead of hanging
+    on a `done` frame that will never arrive.
     """
     async def gen():
-        async with request.app.state.pool.connection() as conn:
-            async for kind, value in retrieve_ranked_with_progress(conn, payload.question):
-                if kind == "progress":
-                    yield json.dumps({"type": "progress", "stage": value}) + "\n"
-                else:
-                    rows, meta, retrieval_ms, translated = value
+        try:
+            async with request.app.state.pool.connection() as conn:
+                async for kind, value in retrieve_ranked_with_progress(conn, payload.question):
+                    if kind == "progress":
+                        yield json.dumps({"type": "progress", "stage": value}) + "\n"
+                    else:
+                        rows, meta, retrieval_ms, translated = value
+        except TorchWorkerBusy as exc:
+            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+            return
         meta_line, context = build_meta_and_context(rows, meta, retrieval_ms, translated)
         yield meta_line
         yield json.dumps({"type": "progress", "stage": "generating"}) + "\n"

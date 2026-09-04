@@ -39,6 +39,8 @@ Two properties this buys, both load-bearing under concurrent load rather than in
 
 A platform-specific correctness note, found by testing, not assumed: on Windows, `asyncio`'s default `ProactorEventLoop` cannot run psycopg's async driver at all (a hard third-party incompatibility, not a config issue) — the serving process requires a selector-based event loop.
 
+**The connection pool isn't the concurrency bottleneck — a non-preemptible thread is.** An adversarial self-audit asked whether a disconnect mid-request leaves a pooled connection stuck. It doesn't: an `async with` block runs its cleanup on task cancellation exactly as it does on any other exception, verified against Starlette's actual disconnect path, not assumed. But every rerank/embed call runs on one dedicated worker thread (`agroteca.torch_runtime`, deliberately single-threaded — see [Deterministic Startup](#deterministic-startup-explicit-model-warmup)), and cancelling the *task* awaiting that thread doesn't stop the *thread* — Python threads aren't preemptible. A disconnect mid-rerank leaves the call running to completion regardless (~500 s on CPU), and without a cap, every other request's call queues silently behind it. `run_torch` now caps in-flight admissions at 2 and rejects immediately past that, rather than queuing unboundedly behind possibly-orphaned work — verified with a live concurrency test, not by inspection.
+
 ### Deterministic Startup: Explicit Model Warmup
 
 `src/agroteca/warmup.py` loads the embedder and cross-encoder reranker onto the configured device and runs one real forward pass through each — `torch.inference_mode()`, then `torch.cuda.synchronize()` on GPU — **inside the same process that will serve requests**, before `uvicorn` accepts its first connection:

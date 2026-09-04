@@ -548,6 +548,10 @@
             const st = document.getElementById('stats'); if (st) st.remove();
             if (streamEl) finalize(streamEl.textContent, meta, msg);
             saveHistory(lastQuestion);
+          } else if (msg.type === 'error') {
+            const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
+            const st = document.getElementById('stats'); if (st) st.remove();
+            answer.textContent = I18N[currentLang].error(msg.message);
           }
         }
       }
