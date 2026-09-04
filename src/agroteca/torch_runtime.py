@@ -16,9 +16,31 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Callable, TypeVar
 
+import torch
+
 T = TypeVar("T")
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="torch-worker")
+
+# CUDA fragmentation safety valve -- gated on measured allocator state, not called unconditionally.
+# PyTorch's caching allocator deliberately RETAINS freed blocks for fast reuse rather than handing
+# them back to the driver; calling empty_cache() after every inference call would force a release-
+# then-reallocate cycle on the very next one, trading real latency for a problem that, for a FIXED
+# request shape, usually isn't there. The one case it genuinely can accumulate is variable-shaped
+# input across a long-running process -- this reranker's batches DO vary in padded sequence length
+# chunk to chunk -- so this checks the actual gap between reserved and allocated device memory and
+# only reclaims past a real threshold, instead of guessing on every call.
+_FRAGMENTATION_THRESHOLD_BYTES = 1024 * 1024 * 1024  # 1 GiB reserved-but-unallocated triggers a reclaim
+
+
+def _reclaim_if_fragmented() -> None:
+    """Runs on the same dedicated worker thread as the torch call it follows -- CUDA calls stay
+    on the thread that owns the context, not on whichever thread happens to await the future."""
+    if not torch.cuda.is_available():
+        return
+    gap = torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+    if gap > _FRAGMENTATION_THRESHOLD_BYTES:
+        torch.cuda.empty_cache()
 
 # Admission control, not cancellation. A cancelled asyncio task only detaches from the
 # run_in_executor future -- it does NOT stop the OS thread underneath it (Python threads
@@ -64,6 +86,13 @@ async def run_torch(func: Callable[..., T], *args, **kwargs) -> T:
         raise TorchWorkerBusy(
             f"torch worker saturated ({_MAX_INFLIGHT} calls already queued/running)"
         )
+    call = partial(func, *args, **kwargs)
+
+    def _call_and_reclaim() -> T:
+        result = call()
+        _reclaim_if_fragmented()
+        return result
+
     async with sem:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_EXECUTOR, partial(func, *args, **kwargs))
+        return await loop.run_in_executor(_EXECUTOR, _call_and_reclaim)
