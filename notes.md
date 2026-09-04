@@ -24,7 +24,7 @@ The lesson underneath the comedy is real: **a corpus is not a library you're pro
 
 ## The contrarian move: build the ruler first
 
-Here's the thing that separates a senior RAG from a bootcamp RAG. A junior builds the whole pipeline, runs three questions through it, watches them work, and declares victory. There's no way to know if the next change makes it better or worse. You're flying blind and calling it intuition.
+Here's the thing that separates a measured system from a demo. The fast way builds the whole pipeline, runs three questions through it, watches them work, and declares victory. There's no way to know if the next change makes it better or worse. You're flying blind and calling it intuition.
 
 So I built the measurement *first* — a "golden set" of 22 questions where I already know the correct answer and the exact page it lives on. And I designed the questions to be **adversarial toward specific bad architectures**:
 
@@ -68,7 +68,7 @@ Some of the best sources are copyrighted books. The tempting shortcut is to have
 
 **Architecturally (the real problem):** a RAG's entire value proposition is *citing a real source*. If I synthesize a paraphrase and cite the original book, I've fabricated attribution — which is the exact hallucination the eval exists to catch. I'd be building the disease into the immune system.
 
-So instead I did two boring, correct things. First, **substitute open-license equivalents** — university extension guides, FAO manuals, public-domain classics — so the citations stay real. Second, for genuine gaps, **author short concept notes** grounded in open sources, clearly labeled as synthetic, and cited *as* synthetic notes, never as the copyrighted author. I wrote it all up in a `DATA_GOVERNANCE.md`, because "I thought carefully about data provenance" is a sentence that makes senior engineers relax in a way that's almost visible.
+So instead I did two boring, correct things. First, **substitute open-license equivalents** — university extension guides, FAO manuals, public-domain classics — so the citations stay real. Second, for genuine gaps, **author short concept notes** grounded in open sources, clearly labeled as synthetic, and cited *as* synthetic notes, never as the copyrighted author. I wrote it all up in a `DATA_GOVERNANCE.md`, because "I thought carefully about data provenance" is a sentence that earns trust in a way that's almost visible.
 
 ## The distractor I kept on purpose
 
@@ -99,7 +99,7 @@ Part 2 will have graphs. This part had a zero-byte chemistry file, and honestly,
 
 ### Notes from building an eval-first agricultural RAG — Part 2: the graphs I promised
 
-In Part 1 I wrote the final exam before I built the student, then spent the whole post refusing to build anything — a strange way to make progress, and a great way to make senior engineers nod. This is the part where the student shows up, sits down, and gets a grade. Three times. Each higher than the last, because I could finally *measure*.
+In Part 1 I wrote the final exam before I built the student, then spent the whole post refusing to build anything — a strange way to make progress, and a slow way to earn the right to trust the numbers that came later. This is the part where the student shows up, sits down, and gets a grade. Three times. Each higher than the last, because I could finally *measure*.
 
 Here's the whole arc in one line, and then I'll earn it:
 
@@ -141,13 +141,13 @@ But "documented upgrade path" turned out to be a promise I'd keep. In **Part 5**
 
 Then, generation — the part everyone thinks is the whole project. Three rules, in order: **GROUND** every sentence in the retrieved context, **CITE** the source after each claim, and **ABSTAIN** — reply with one fixed phrase — when the context simply doesn't contain the answer.
 
-Two decisions in there are more senior than they look. First, the rules live in the model's *system* instructions, kept separate from the retrieved text — because a retrieved chunk is untrusted input that could itself contain "ignore your previous instructions," and I don't want a poisoned document to be able to switch off my abstention rule. Second, I run the model **locally**, on purpose: it's free, it works with no internet (this is also meant to be a real tool on a real farm someday), and the copyrighted chunks in my local-only tier never leave my machine.
+Two decisions in there matter more than they look. First, the rules live in the model's *system* instructions, kept separate from the retrieved text — because a retrieved chunk is untrusted input that could itself contain "ignore your previous instructions," and I don't want a poisoned document to be able to switch off my abstention rule. Second, I run the model **locally**, on purpose: it's free, it works with no internet (this is also meant to be a real tool on a real farm someday), and the copyrighted chunks in my local-only tier never leave my machine.
 
 Which model? I measured that too. A 7-billion-parameter model and a 3-billion one abstained *identically* on the unanswerable questions — the 3B just did it three times faster. Because RAG generation isn't a reasoning contest; retrieval already did the thinking. The generator's whole job is to read what it's given, obey the rules, and cite. That's an obedience task, and obedience doesn't need a genius.
 
 ## The best bug I found this whole project
 
-Here's the one I'll be telling in interviews.
+Here's the one I'm proudest of.
 
 The generation eval flagged a hallucination. I'd asked for the recommended stocking density of tilapia in an aquaponic system — a question I had deliberately labeled *unanswerable*, a trap to prove the model would abstain. Instead it confidently produced a number. Caught red-handed inventing facts. Open and shut.
 
@@ -181,7 +181,7 @@ The first move was to make the answer **stream** — appear word by word as the 
 
 I know this because I built the slow version first, on purpose, and sat through the dead spinner. Then I built the streaming version and watched the same answer type itself out. Same seven minutes. One felt broken; the other felt like watching someone think.
 
-**Streaming doesn't reduce latency. It reduces *anxiety*.** That distinction — perceived versus actual — is the whole game in slow-but-honest systems, and it's the sentence I'll offer when an interviewer asks how a seven-minute app is acceptable. (There's also a seedling that grows while you wait — sprout, flower, fruit, drop, reseed, forever, until the answer arrives. A small thing that completely changes how the wait feels.)
+**Streaming doesn't reduce latency. It reduces *anxiety*.** That distinction — perceived versus actual — is the whole game in slow-but-honest systems, and it's the sentence that answers the obvious objection to a seven-minute app. (There's also a seedling that grows while you wait — sprout, flower, fruit, drop, reseed, forever, until the answer arrives. A small thing that completely changes how the wait feels.)
 
 ## The drawer, or: show your work
 
@@ -203,7 +203,7 @@ And when the corpus genuinely can't answer — the tilapia question's honest cou
 
 Somewhere this became a real product — dark mode, two languages, shareable links, session history, keyboard shortcuts, a live health dot, a corpus-scale ribbon, a tokens-per-second readout, a Stop button, copy and export, thumbs feedback that logs to the server.
 
-Thirty features is exactly how a beautiful app becomes an ugly one. The rule I held: **the empty screen stays a calm search box.** Everything else lives one gesture away — behind a drawer, a hover, a keystroke, a toggle. Calm by default, powerful on demand. An employer should see elegance first and *discover* the depth, which is far more convincing than being handed a dashboard.
+Thirty features is exactly how a beautiful app becomes an ugly one. The rule I held: **the empty screen stays a calm search box.** Everything else lives one gesture away — behind a drawer, a hover, a keystroke, a toggle. Calm by default, powerful on demand. Anyone opening it should see elegance first and *discover* the depth — that's far more convincing than being handed a dashboard.
 
 ## The look, or: let the type do the work
 
@@ -217,7 +217,7 @@ Could a stranger open a URL right now? Almost. The one thing between here and th
 
 Three posts ago I wrote a final exam before I built a student. Two posts ago the student sat the exam, its scores climbing one measured step at a time — and then caught its own examiner in a mistake. This post, the student opened a practice, hung a sign out in two languages, and started showing every visitor exactly how it reached each answer — or admitting, plainly, when it couldn't.
 
-The interesting part was never the line count. It was the judgment: measure before you build, distrust your own metrics, show your work, and know when to say "I don't know." A system that does those four things is trustworthy. A person who does them is worth hiring.
+The interesting part was never the line count. It was the judgment: measure before you build, distrust your own metrics, show your work, and know when to say "I don't know." A system that does those four things is trustworthy. So is a person who does them the same way, every time, whether or not anyone's watching.
 
 That was always the point.
 
@@ -271,7 +271,7 @@ Four posts ago I wrote an exam before the student existed. The student sat it, c
 
 The judgments were the point all along: measure before you build, distrust your own metrics, show your work, know when to say "I don't know" — and, the one this post earned, **run it before you believe it.** The first four make a system trustworthy. The fifth is what makes it *real*.
 
-A person who does all five is worth hiring. That was always the point.
+The same five, applied to a person instead of a system, describe someone you could actually rely on. That was always the point.
 
 ---
 
@@ -279,7 +279,7 @@ A person who does all five is worth hiring. That was always the point.
 
 ### Notes from building an eval-first agricultural RAG — Part 5: running the experiment that can prove you wrong
 
-Four posts in, the system worked and the number was honest: 0.75. But an honest number invites the question a senior engineer always asks next — *where's the ceiling, and what's the next lever?* The tempting answer sat in my own README: swap the fast little MiniLM embedder for e5-large, the heavyweight everyone reaches for. Bigger model, better retrieval, higher number. Obvious.
+Four posts in, the system worked and the number was honest: 0.75. But an honest number invites the obvious next question — *where's the ceiling, and what's the next lever?* The tempting answer sat in my own README: swap the fast little MiniLM embedder for e5-large, the heavyweight everyone reaches for. Bigger model, better retrieval, higher number. Obvious.
 
 Obvious is exactly the trap. "Swap in the bigger model and call it an upgrade" is a guess wearing a lab coat. So instead of a swap, I ran an **experiment** — designed, like the golden set, to be able to *disprove me*.
 
@@ -307,7 +307,7 @@ e5's **dense retrieval doubled** — answer@5 from 0.35 to 0.75. Not noise: a fo
 
 And the part I'm proudest of, because it cost me my hypothesis: **I predicted e5 would fix the cross-lingual misses** — the Spanish questions whose answer phrase is English. It didn't. All three survived the upgrade; e5 recovered a *different*, same-language question instead. So those misses were never an embedder problem. They're a cross-lingual *alignment* problem, and no bigger vector model touches them — the fix lives on the query side, in translation, which is now my *measured* next lever instead of a guess.
 
-## The decision, and why it's the senior one
+## The decision, and why it's the disciplined one
 
 So I kept the fast MiniLM shipped. e5 doubles dense recall, but the reranker already captures most of that at the finish, and e5 costs 8× the query latency plus a schema migration — a real bill for a noise-level final gain. I wrote the whole thing down: the doubling, the masking, the falsified prediction, the tradeoff.
 
@@ -343,7 +343,7 @@ I made the trade deliberately and then wrote down what it cost, the same discipl
 
 ## The slowdown, and the hypothesis I was wrong about
 
-Here's the part I'd tell in an interview.
+Here's the part that matters most.
 
 After the pivot, a single rerank call — the exact operation that used to take about 25 seconds on CPU — started taking minutes. Sometimes it didn't return inside a 10-minute timeout at all. My first, entirely reasonable hypothesis: **thread oversubscription.** `asyncio.to_thread` pulls from a pool of up to sixteen-ish worker threads, and PyTorch's CPU backend initializes its own internal thread pool the first time it runs on a given OS thread. Different requests landing on different worker threads could mean a dozen-plus competing thread pools fighting over twelve physical cores. It's a real, documented failure mode. I built the fix — a single dedicated worker thread for every torch call, so the model's thread pool initializes exactly once — and reran the test.
 

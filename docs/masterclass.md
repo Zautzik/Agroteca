@@ -1,10 +1,10 @@
 # Agroteca — Masterclass, Skills Inventory & Roadmap
 
 > A living study document **and** a from-first-principles study guide: what I've built, what I've
-> *learned*, where the project stands, and how to explain it in an interview (Parts 1–5) — plus the
+> *learned*, where the project stands, and how to explain it clearly (Parts 1–5) — plus the
 > **full technical foundation underneath it**: the mathematics derived, the system design, and every
 > library choice with its rejected alternatives (Parts 6–9). Every **one-breath answer** is phrased
-> the way I'd say it out loud to an interviewer; every formula is one you can reproduce at a whiteboard.
+> the way I'd say it out loud, plainly; every formula is one you can reproduce at a whiteboard.
 >
 > _Status snapshot: end-to-end complete and pushed — governed corpus → measured retrieval
 > cascade → grounded/cited/abstaining generation → a **production-hardened**, **containerized**
@@ -45,7 +45,7 @@
 
 ## Part 1 — What I've developed
 
-Depth is marked honestly: 🟢 interview-solid · 🟡 emerging, needs a few more reps.
+Depth is marked honestly: 🟢 solid · 🟡 emerging, needs a few more reps.
 
 ### 1A. Technical / hard skills
 
@@ -74,9 +74,9 @@ Depth is marked honestly: 🟢 interview-solid · 🟡 emerging, needs a few mor
 | **Experiment design** | staged experiments (cheapest decisive test first); a *control* in a cosine A/B; accepting a falsified hypothesis and reading the architecture under a flat metric; isolating a fake variable (threading) from the real one (benchmark input length) with a controlled A/B | 🟢 |
 | **Containerization / MLOps** | multi-stage `uv` + CUDA Docker build, non-root, health-checked; weights baked in at build time (immutable, offline-startable); a real multi-service `docker compose up`; governance enforced at the image layer; idempotent, resumable ingest for long re-indexes | 🟡 |
 
-### 1B. Cognitive habits (the senior-maker skills)
+### 1B. Cognitive habits (the ones that compound)
 
-These matter *more* than the table above. An interviewer can teach a junior `tsvector`; they can't easily teach these.
+These matter *more* than the table above. Anyone can be taught `tsvector`; these are harder to teach.
 
 | Habit | The move | Where I did it |
 |---|---|---|
@@ -89,7 +89,7 @@ These matter *more* than the table above. An interviewer can teach a junior `tsv
 | **Tradeoff literacy** | Name the price of every choice out loud | local vs API (latency), 7B vs 3B (speed vs "IQ"), k vs coverage |
 | **Run it to find what reading can't** | Some failures are emergent — stand the service up and hit it | Idle-dropped pool connection, a strangling timeout, ONNX cold-start — all found live |
 
-### 1C. War stories (STAR-ready — memorize 3–4)
+### 1C. War stories (the ones worth being able to tell well)
 
 1. **The AND-vs-OR lexical bug** — `websearch_to_tsquery` ANDs terms by default, so full-question queries matched *nothing* (lexical = 0.00). Fixed with an OR-of-content-terms query. _Lesson: read the tool's default behavior, don't assume._
 2. **The q18 golden mislabel** — the eval flagged a hallucination; inspecting the retrieved chunks showed the model was *correct* and the ground-truth label was wrong. _Lesson: your eval is only as good as its labels._
@@ -142,7 +142,7 @@ These matter *more* than the table above. An interviewer can teach a junior `tsv
 
 **The embedder upgrade, measured (not guessed):** a full e5-large re-index (§4.13) lifts *dense* answer@5 **0.35 → 0.75** — e5's dense *alone* ≈ the shipped reranked cascade — but the *final* only **0.75 → 0.80**, because the reranker was already masking the weak dense. I **kept MiniLM shipped**: a noise-level final gain doesn't justify e5's ~8× slower query embed and a `VECTOR(1024)` migration. The value was the *finding*, not the swap.
 
-**Generation — the honest read (qwen2.5:3b, k=5):** grounds, **cites to the page** (`Book.pdf, p. 37`), and **abstains** on genuine no-answer via a canonical, machine-checkable phrase. Citation is scored against a deliberately strict regex that *under*-counts — the model cites in each source's own idiom (title, author-year, filename), so the interview move is to name that as a **measurement** limitation, not a model failure. Retrieval latency is production-grade (bi-encoder p95 ≤ 250 ms); the cross-encoder is now GPU-scoped for real speed — on CPU it measures **~500 s/query** (war story #9), up from the old ONNX backend's ~25 s, the honest cost of an eager-mode `torch` model on unoptimized weights. A GPU host is no longer an optional speed lever; it's the deploy requirement, and the config makes it a one-env-var swap once you have one.
+**Generation — the honest read (qwen2.5:3b, k=5):** grounds, **cites to the page** (`Book.pdf, p. 37`), and **abstains** on genuine no-answer via a canonical, machine-checkable phrase. Citation is scored against a deliberately strict regex that *under*-counts — the model cites in each source's own idiom (title, author-year, filename), so the honest move is to name that as a **measurement** limitation, not a model failure. Retrieval latency is production-grade (bi-encoder p95 ≤ 250 ms); the cross-encoder is now GPU-scoped for real speed — on CPU it measures **~500 s/query** (war story #9), up from the old ONNX backend's ~25 s, the honest cost of an eager-mode `torch` model on unoptimized weights. A GPU host is no longer an optional speed lever; it's the deploy requirement, and the config makes it a one-env-var swap once you have one.
 
 **Stack:** Postgres 16 + pgvector (Docker, host 5433) · `sentence-transformers` MiniLM-L12 (384-dim, `torch`/CUDA) · `jinaai/jina-reranker-v2-base-multilingual` reranker (`transformers`, `trust_remote_code`, pinned to a reviewed commit) · `qwen2.5:3b` via Ollama (config-swappable host/model) · FastAPI + `psycopg_pool.AsyncConnectionPool` (async DI, validate-on-checkout) · a self-contained OKLCH / tri-font streaming web app · pytest · `uv`/hatchling · Docker Compose (multi-service, GPU-scheduled).
 
@@ -166,7 +166,7 @@ These matter *more* than the table above. An interviewer can teach a junior `tsv
 
 ## Part 4 — The Masterclass
 
-Explaining the **whole system** as one coherent narrative. Deliver this and you can carry a 45-minute technical interview.
+Explaining the **whole system** as one coherent narrative — the kind that holds up under sustained, detailed questioning, not just a summary that sounds good once.
 
 ### 4.1 — The one-sentence pitch
 > *"Agroteca is an eval-first, bilingual RAG system over agricultural documents: it answers agronomy questions strictly from a governed corpus, with citations, and abstains when it can't — and every component was measured against a golden set built before the system existed."*
@@ -223,7 +223,7 @@ CITE    → (source_file.pdf) after the claim
 ABSTAIN → exact canonical phrase when the corpus can't answer
 ```
 
-Two senior details:
+Two details that matter more than they look:
 - **Rules live in the `system` role**, separate from retrieved context — a prompt-injection payload hiding inside a document chunk can't easily override the abstention rule.
 - **The abstain phrase is *canonical* on purpose** — an exact, machine-detectable string, so abstention is a measurable metric, not a vibe.
 
@@ -237,7 +237,7 @@ Four tiers, each controlling *where a document may appear*: **open** (deployable
 
 > **One-breath answer to "how do you handle copyright/licensing?"** — *"Provenance is first-class — every document lives in exactly one tier, and the tier controls whether it can be served publicly. Copyrighted material runs only in local mode and is never in a public deployment."*
 
-### 4.9 — Interview lightning round (rapid-fire)
+### 4.9 — Lightning round (rapid-fire)
 
 - **"Why hybrid search?"** → *Dense misses exact codes, lexical misses paraphrase; fusion gets both.*
 - **"Why a reranker?"** → *Bi-encoders give good recall but imperfect precision — a cross-encoder reads the pair together and sharpens the top, cheaply, on a small pool.*
@@ -248,7 +248,7 @@ Four tiers, each controlling *where a document may appear*: **open** (deployable
 
 ### 4.10 — The serving layer, and the gap it closes
 
-The thing an interviewer is really probing: can you take a working model and *serve strangers*?
+The real question underneath all of it: can you take a working model and *serve strangers*?
 
 - **Config-driven models** — the LLM, host, timeouts, pool size, and inference device are settings, not source; a deploy swaps the unservable local CPU model for a hosted GPU one with an env var. The single change that makes it deployable at all.
 - **An async, health-checked connection pool** — `psycopg_pool.AsyncConnectionPool` (`min_size=5, max_size=20, timeout=30.0`), injected via FastAPI's `Depends()` so routes never touch the pool object; each connection validates on checkout, so an idle-dropped connection is replaced transparently rather than 500-ing a request. The stream path's dependency releases its connection *before* the minutes-long generation — enforced by FastAPI's own dependency-teardown ordering, not a manual `finally` — so an answer never holds the pool hostage.
@@ -293,11 +293,11 @@ The retrieval headline is one embedder deep. To test whether a better one was th
 | MiniLM-384, 128-tok (kill truncation) | 0.60 | 0.45 | 0.90 | 0.52 |
 | **e5-large-1024, 512-tok (stronger model)** | **0.80** | 0.70 | 0.85 | 0.75 |
 
-Three findings, in ascending order of how senior they sound:
+Three findings, in ascending order of how much they change the picture:
 
 1. **The dense layer, not the final layer, holds the truth.** e5's *dense* `answer@5` went **0.35 → 0.75** — a +0.40 swing that is not noise on any sample size. The *final* number moved +0.05, because the cross-encoder reranker had been *compensating* for MiniLM's weak dense. **A stronger retriever relocates quality out of the expensive reranker and into cheap dense search** — the same accuracy at lower serving complexity (you could shrink or drop the reranker). That architecture win is invisible in the flat headline; you only see it if you read the per-stage rows.
 2. **Chunk size is a tradeoff, not a bug.** Eliminating truncation (128-tok) *raised* document recall but *lowered* answer precision — 512 was already near-optimal for this cascade. The obvious fix degraded the product; only the measurement caught it.
-3. **My hypothesis was falsified — and that's the credential.** I predicted e5 would fix the cross-lingual misses; it fixed a *different* one and left all three cross-lingual cases missed. Those are a representation-alignment-across-languages problem compounded by exact-answer-phrase specificity — a bottleneck no embedder swap has moved. A clean negative that redirects the next experiment (query-side translation) instead of another blind model swap.
+3. **My hypothesis was falsified — and that's the part worth keeping.** I predicted e5 would fix the cross-lingual misses; it fixed a *different* one and left all three cross-lingual cases missed. Those are a representation-alignment-across-languages problem compounded by exact-answer-phrase specificity — a bottleneck no embedder swap has moved. A clean negative that redirects the next experiment (query-side translation) instead of another blind model swap.
 
 > **One-breath:** *"I benchmarked the embedder upgrade end to end. Dense retrieval doubled — but the final number barely moved, because my reranker was already masking the weak dense; a better retriever just did the reranker's job earlier. And the misses I predicted it would fix, it didn't — they're cross-lingual, a deeper problem. So the real result isn't 'a better model,' it's 'the reranker was compensating, and my recall gap needs translation, not vectors.' I'd rather report that than a number that flattered a wrong story."*
 
@@ -383,11 +383,11 @@ Where §4.13 is "I predicted a fix and the experiment disproved it," this is its
 
 **The dependency-bloat claim inverted into evidence for a decision already made.** `pyproject.toml` and `uv.lock` came back clean — 12 direct dependencies, all traceable to real use, no stray tooling. But I measured cold-import cost instead of eyeballing the list, and it's real: 12–68 seconds (high run-to-run variance, likely Windows disk/AV-scan effects) just to import `torch` + `transformers` + `sentence-transformers` + `fastapi`. That's not bloat to trim — every one of those is load-bearing — and the only code change that would shave it, lazy-importing them, would be a straight regression against the warmup architecture from Part 6: paying that cost once at startup, deliberately, instead of on a user's first request. The measurement didn't find a new bug. It quantified why the old fix was correct.
 
-> **One-breath:** *"Handed four specific, plausible-sounding failure claims, I checked each against the real system before writing a line of code. Two were architecturally moot — the event loop was never the thread doing GPU transfers, and the tensors in question live inside third-party code I'd have to fork to touch. One was disprovable directly: I ran a live EXPLAIN and read the connection pool's actual source instead of trusting the framing. One was half-right, so I built the honest version — a fragmentation reclaim gated on a measured threshold, not a habit, running on the correct thread. And the 'bloat' question, measured rather than assumed, turned into evidence that a decision I'd already made — pay the import cost once at startup — was the right one. A senior review isn't proving the reviewer's hypotheses; it's telling them which ones were wrong, with the receipts."*
+> **One-breath:** *"Handed four specific, plausible-sounding failure claims, I checked each against the real system before writing a line of code. Two were architecturally moot — the event loop was never the thread doing GPU transfers, and the tensors in question live inside third-party code I'd have to fork to touch. One was disprovable directly: I ran a live EXPLAIN and read the connection pool's actual source instead of trusting the framing. One was half-right, so I built the honest version — a fragmentation reclaim gated on a measured threshold, not a habit, running on the correct thread. And the 'bloat' question, measured rather than assumed, turned into evidence that a decision I'd already made — pay the import cost once at startup — was the right one. A real review isn't proving the reviewer's hypotheses; it's telling them which ones were wrong, with the receipts."*
 
 ---
 
-## Part 5 — Interview Question Bank
+## Part 5 — Questions Worth Answering Well
 
 Every answer is grounded in *this* project, phrased to say out loud in one or two breaths. **★** marks questions your own results or war stories make especially strong. Practice the ★ ones until they're reflex.
 
@@ -469,7 +469,7 @@ Every answer is grounded in *this* project, phrased to say out loud in one or tw
 - **★ What happens if a client disconnects mid-request — does the DB connection leak?** → *No — `async with pool.connection()` is a standard context manager, and a cancelled asyncio task still runs `__aexit__` on unwind, so the pooled connection returns cleanly. What actually breaks is one layer down: cancelling the task only detaches it from the executor future, it doesn't stop the OS thread running the blocking `torch` call underneath — Python threads aren't preemptible. That call runs to completion regardless (~500s on CPU), and without a cap, every other request's torch call queues silently behind it. I found this by deliberately auditing the DB-lifecycle question and tracing it one layer past where the question pointed, then fixed it with admission control — reject past 2 in-flight calls instead of queuing unboundedly — since you can't cancel a running thread, only stop admitting more work behind it.*
 - **★ How do you know your connection pool won't leave a poisoned connection after a failed query, and that your vector search is actually hitting the index?** → *I didn't take either on faith. I ran `EXPLAIN ANALYZE` on the app's real dense-retrieval query against the live corpus and read `Index Scan using chunks_embedding_hnsw` directly off the plan — confirmed, not assumed. For the pool, I read `psycopg_pool`'s installed source: `pool.connection()` wraps every checkout in `async with conn:`, which is psycopg3's own commit-on-success/rollback-on-exception behavior, executed before the connection is ever returned to the pool. A failed or timed-out query can't leave an aborted transaction sitting in the pool — the library already prevents it. The discipline in both cases is the same: read the actual plan or the actual source before answering a question about behavior you didn't personally verify.*
 
-### 5.10 — Judgment, debugging & behavioral (STAR)
+### 5.10 — Judgment, debugging & behavioral
 
 - **★ Tell me about a bug you're proud of finding.** → *Lexical search scored 0.00. `websearch_to_tsquery` ANDs terms by default, so a full-sentence question matched no chunk that contained every word. I switched to an OR of the content terms. Lesson: read the tool's default behavior before trusting it.*
 - **★ Tell me about a time you were wrong.** → *I diagnosed a generation failure as a retrieval problem and was about to add a relevance gate. I inspected first — the retrieval was right, the model was right, and the golden-set label was wrong. I revised the diagnosis and fixed the label instead.*
@@ -506,7 +506,7 @@ Every answer is grounded in *this* project, phrased to say out loud in one or tw
 - **★ How would you ship this?** → *It's containerized — a two-stage `uv` build off a committed lockfile, a slim non-root runtime, a `/health` healthcheck, models cached in a volume. One image serves the API and, with an override command, runs the ingest. And the copyrighted tier can't ship: the Dockerfile never COPYs `data/raw`, so governance holds at the image layer, not just in config.*
 - **★ Your re-index is ~7 hours — how do you make that survivable?** → *Idempotent, resumable ingest. Each document's delete+insert commits atomically, so a `--resume` flag skips finished docs and `--limit` runs the next N — the re-index becomes small restartable batches instead of one fragile uninterrupted pass. I built that after a session-bound run died to a machine sleep: the lesson was to make a long job outlive its launcher.*
 - **How does the deploy stay legally clean at the UI?** → *The served corpus is open + synthetic only (`LOCAL_MODE` off never ingests the copyrighted tier), and the drawer badges every source with its governance tier — provenance is visible, not merely enforced.*
-- **★ What would make you say this system is production-ready vs. a portfolio piece?** → *It's the middle ground, honestly: the retrieval layer and the serving hardening are production-grade and verified live; the CPU model is not, by design, but the config makes the swap to a hosted one a single env var. I'd name exactly that in an interview rather than overclaim — the honesty is the credibility.*
+- **★ What would make you say this system is production-ready vs. a personal project?** → *It's the middle ground, honestly: the retrieval layer and the serving hardening are production-grade and verified live; the CPU model is not, by design, but the config makes the swap to a hosted one a single env var. I'd name exactly that rather than overclaim — the honesty is the credibility.*
 
 ---
 
@@ -602,7 +602,7 @@ MRR      = (1/|Q|) · Σ RR                        # mean reciprocal rank
 ### 6.9 — The reranker's score, and small-sample statistics
 
 - The cross-encoder emits a **logit** — higher = more relevant. I sort `reverse=True`, and that assumption is **unit-tested** (a relevant pair scored `+1.25`, an irrelevant one `−3.72`): a flipped comparator wouldn't crash, it would *silently* invert ranking.
-- **Statistical honesty (n = 20):** one question is `0.05` of `answer@5`. A Wald 95% CI on a proportion `p̂ = 0.75, n = 20` is roughly `±0.19` — **wide**. So I treat single-question cross-config differences as **directional**, trust multi-question gaps (like a 4-doc `doc@5` swing) as **signal**, and say so out loud. *Reporting the confidence interval you can't shrink is the statistics credential.*
+- **Statistical honesty (n = 20):** one question is `0.05` of `answer@5`. A Wald 95% CI on a proportion `p̂ = 0.75, n = 20` is roughly `±0.19` — **wide**. So I treat single-question cross-config differences as **directional**, trust multi-question gaps (like a 4-doc `doc@5` swing) as **signal**, and say so out loud. *Reporting the confidence interval you can't shrink is the honest version of statistical rigor.*
 
 ---
 
@@ -686,7 +686,7 @@ The app is also wired into `docker-compose.yml` alongside the database (GPU-sche
 
 ## Part 8 — Python, Libraries & the Choices Behind Them
 
-> Every dependency was a *choice* with alternatives. This is the defense of each — the pros/cons an interviewer probes with *"why X and not Y?"* The pattern to notice: **most choices are downstream of two hard constraints — run locally (governance: copyrighted chunks never leave the machine) and run on CPU (cost).**
+> Every dependency was a *choice* with alternatives. This is the defense of each — the pros/cons worth being able to hold up under a plain *"why X and not Y?"* The pattern to notice: **most choices are downstream of two hard constraints — run locally (governance: copyrighted chunks never leave the machine) and run on CPU (cost).**
 
 ### 8.1 — Embeddings & reranking → `sentence-transformers` / `transformers` on `torch` (was `fastembed`)
 - **Originally chosen:** fastembed (Qdrant's ONNX-Runtime embedding lib) — no PyTorch, CPU-optimized, ships quantized weights. Right call for a CPU-only, PyTorch-free serving story, and it shipped that way for most of the project.
@@ -745,7 +745,7 @@ Generators (`yield` — the streaming backbone, and FastAPI's dependency-teardow
 
 ## Part 9 — The Concepts to Master (your syllabus)
 
-> The checklist to *own* this subject, not just this repo. 🟢 solid · 🟡 review before an interview. Each line is "the concept — why it matters here."
+> The checklist to *own* this subject, not just this repo. 🟢 solid · 🟡 review again. Each line is "the concept — why it matters here."
 
 **Information Retrieval**
 - 🟢 Precision / recall / F1; MRR; nDCG; MAP — *the language of "did it find the answer, and how high?"*
@@ -790,7 +790,7 @@ Generators (`yield` — the streaming backbone, and FastAPI's dependency-teardow
 - 🟡 Quantization (GGUF), local vs hosted serving — *the cost/speed frontier.*
 - 🟢 Prefill vs decode cost — *why CPU generation stalls on a big RAG prompt.*
 
-**The frontiers to grow into (ties to the career roadmap)**
+**The frontiers to grow into**
 - 🔴 RAGAS + semantic eval · **query transformation / translation** (my measured cross-lingual lever) · agentic & multi-hop RAG · fine-tuning an embedder on domain data. *These are where "next steps" answers become real projects.*
 
 > **How to use Part 9:** turn every 🟡/🔴 into a one-paragraph note in your own words, then a tiny experiment. That's the same *measure-it-yourself* loop that built the rest of this document — the only study method this project actually endorses.
