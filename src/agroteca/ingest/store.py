@@ -23,6 +23,14 @@ def connect() -> psycopg.Connection:
     return conn
 
 
+async def connect_async() -> psycopg.AsyncConnection:
+    """Async twin of connect() for eval/CLI scripts that need the async production retrieval
+    path (retrieve_ranked_async and friends). The served API uses make_async_pool() instead."""
+    conn = await psycopg.AsyncConnection.connect(settings.db_url, **KEEPALIVE)
+    await register_vector_async(conn)
+    return conn
+
+
 def make_pool(min_size: int = 1, max_size: int | None = None) -> ConnectionPool:
     """A connection pool for the served API: reuses connections instead of a fresh TCP
     handshake + auth per request. `configure` runs register_vector on each pooled

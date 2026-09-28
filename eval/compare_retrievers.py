@@ -9,17 +9,18 @@ answer@k / document@k the Phase-2 baseline reported and adds the ranking-quality
     uv run python eval/compare_retrievers.py --k 5 --latency     # + per-stage p50/p95 retrieval latency
 """
 import argparse
+import asyncio
 import statistics
 import sys
 import time
 
 from _scoring import load_answerable, score
 from agroteca.config import settings
+from agroteca.generate import retrieve_ranked_async
 from agroteca.ingest import store
 from agroteca.retrieve.dense import dense_search
 from agroteca.retrieve.hybrid import hybrid_search
 from agroteca.retrieve.lexical import lexical_search
-from agroteca.retrieve.rerank import rerank_search
 
 GOLDEN = settings.root / "eval" / "golden_set.jsonl"
 
@@ -63,11 +64,23 @@ def main(k, open_only, do_latency):
         with pool.connection() as conn:
             return _sf_text(search(conn, query, kk, tiers=tiers, **kw))
 
+    async def _rerank_production(query: str, kk: int):
+        # Goes through the real production path (translate_query + bilingual rerank when
+        # enabled), unlike the other three rows here -- a fresh AsyncConnection per call
+        # since an AsyncConnection must not be reused across separate asyncio.run() event
+        # loops. Trivial overhead at golden-set scale (22 questions).
+        conn = await store.connect_async()
+        try:
+            rows, _meta, _ms, _translated = await retrieve_ranked_async(conn, query, k=kk, tiers=tiers)
+            return [(sf, text) for (_cid, sf, text, _score) in rows]
+        finally:
+            await conn.close()
+
     methods = {
         "dense":   lambda q, kk: run(dense_search, q, kk),
         "lexical": lambda q, kk: run(lexical_search, q, kk),
         "hybrid":  lambda q, kk: run(hybrid_search, q, kk, n=60),
-        "rerank":  lambda q, kk: run(rerank_search, q, kk),
+        "rerank":  lambda q, kk: asyncio.run(_rerank_production(q, kk)),
     }
 
     scope = (f"OPEN-ONLY deploy corpus ({'+'.join(DEPLOY_TIERS)}, no 'local')"
@@ -90,6 +103,10 @@ def main(k, open_only, do_latency):
     print(f"still missed by rerank:     {sorted(rmiss) or '-'}")
 
     if do_latency:
+        # NOTE: the "rerank" row now goes through the real production path (translation +
+        # a fresh AsyncConnection per call), so its latency here includes connection setup
+        # and asyncio.run overhead the other three pooled-connection rows don't pay -- no
+        # longer apples-to-apples for latency, though still valid for correctness/answer@k.
         latency_pass(methods, qs)
     pool.close()
 
@@ -103,4 +120,10 @@ if __name__ == "__main__":
                     help="also report per-stage retrieval latency (p50/p95)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.platform == "win32":
+        # psycopg's async mode can't run on Windows' default ProactorEventLoop. Production
+        # (api.py) runs inside the Linux container per the Dockerfile and never hits this --
+        # it's specific to invoking the async retrieval path directly from a native-Windows
+        # CLI script, which is what the "rerank" row's asyncio.run() calls now do.
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     main(args.k, args.open_only, args.latency)

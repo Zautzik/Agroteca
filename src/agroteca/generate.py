@@ -82,6 +82,20 @@ def ask_ollama(system: str, user: str) -> str:
     return resp["message"]["content"]
 
 
+async def ask_ollama_async(system: str, user: str) -> str:
+    """Async twin of ask_ollama, for callers already on an event loop (eval scripts composing
+    the production async retrieval + generation path)."""
+    resp = await _async_client.chat(
+        model=settings.gen_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        options=_GEN_OPTS,
+    )
+    return resp["message"]["content"]
+
+
 def answer(conn, question: str, k: int = 5) -> str:
     """Retrieve the top-k chunks for the question, then generate a grounded, cited answer."""
     rows = rerank_search(conn, question, k=k)              # 1. real chunks from the corpus
@@ -163,11 +177,49 @@ async def _meta_for_async(conn, chunk_ids):
     return {cid: (tier, page) for cid, tier, page in rows}
 
 
-async def retrieve_ranked_async(conn, question: str, k: int = 5):
+async def topics_for_async(conn, chunk_ids) -> dict[str, str | None]:
+    """chunk_id -> raw manifest topic, for building a no-answer off-ramp (agroteca.suggest).
+
+    Deliberately a SEPARATE query rather than a third column on _meta_for_async: that
+    function's (tier, page) tuple is unpacked positionally in six places across the sync and
+    async paths, including `answer()`/`answer_stream()`, and widening it would mean editing
+    the working answer path to serve the failure path. This runs only when the model
+    abstained -- the rare case -- so an extra small round-trip costs nothing that matters.
+    """
+    if not chunk_ids:
+        return {}
+    cur = await conn.execute(
+        "SELECT chunk_id, topic FROM chunks WHERE chunk_id = ANY(%s)", (list(chunk_ids),)
+    )
+    return {cid: topic for cid, topic in await cur.fetchall()}
+
+
+async def corpus_topic_counts_async(conn, tiers: list[str] | None = None) -> list[tuple[str, int]]:
+    """(topic, document_count) across the corpus, biggest first — the fallback ordering for
+    the no-answer off-ramp when retrieval returned too little to rank by relevance.
+
+    Counts DISTINCT doc_id, not chunks: a single long book would otherwise outrank a subject
+    covered by several shorter ones purely by being long. `tiers` must be the set this
+    deployment actually serves, or the list can advertise a subject whose only documents are
+    the copyrighted tier."""
+    sql = "SELECT topic, count(DISTINCT doc_id) FROM chunks WHERE topic IS NOT NULL"
+    params: tuple = ()
+    if tiers:
+        sql += " AND tier = ANY(%s)"
+        params = (list(tiers),)
+    sql += " GROUP BY topic ORDER BY count(DISTINCT doc_id) DESC"
+    cur = await conn.execute(sql, params)
+    return [(topic, n) for topic, n in await cur.fetchall()]
+
+
+async def retrieve_ranked_async(conn, question: str, k: int = 5, tiers: list[str] | None = None):
     """The retrieval-only phase, shared by prepare_ndjson_async (the /ask/stream + generation
     path) and the /retrieve route (eval/introspection -- no generation): translate + hybrid
     rerank + tier/page lookup. translate_query is a blocking Ollama call, so it runs in a
     worker thread rather than the event loop.
+
+    `tiers`: optional governance-tier filter (e.g. deploy-only eval runs); None (the default,
+    and what the served API always passes) means the full corpus, matching prior behavior.
 
     Returns (rows, meta, retrieval_ms, translated):
       rows -> [(chunk_id, source_file, text, score), ...], best first
@@ -176,9 +228,9 @@ async def retrieve_ranked_async(conn, question: str, k: int = 5):
     t0 = time.perf_counter()
     translated = await asyncio.to_thread(translate_query, question) if settings.translate_queries else None
     if translated:
-        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k)
+        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k, tiers=tiers)
     else:
-        rows = await rerank_scored_async(conn, question, k=k)
+        rows = await rerank_scored_async(conn, question, k=k, tiers=tiers)
     meta = await _meta_for_async(conn, [r[0] for r in rows])
     retrieval_ms = int((time.perf_counter() - t0) * 1000)
     return rows, meta, retrieval_ms, translated
@@ -208,7 +260,7 @@ async def prepare_ndjson_async(conn, question: str, k: int = 5) -> tuple[str, st
     return build_meta_and_context(rows, meta, retrieval_ms, translated)
 
 
-async def retrieve_ranked_with_progress(conn, question: str, k: int = 5):
+async def retrieve_ranked_with_progress(conn, question: str, k: int = 5, tiers: list[str] | None = None):
     """Async-generator twin of retrieve_ranked_async for the /ask/stream progress UI: yields
     ("progress", stage) events at each real phase boundary, then a final ("result", payload)
     event with the same (rows, meta, retrieval_ms, translated) tuple retrieve_ranked_async
@@ -230,9 +282,9 @@ async def retrieve_ranked_with_progress(conn, question: str, k: int = 5):
 
     yield ("progress", "reranking")
     if translated:
-        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k)
+        rows = await rerank_scored_bilingual_async(conn, question, translated, k=k, tiers=tiers)
     else:
-        rows = await rerank_scored_async(conn, question, k=k)
+        rows = await rerank_scored_async(conn, question, k=k, tiers=tiers)
 
     meta = await _meta_for_async(conn, [r[0] for r in rows])
     retrieval_ms = int((time.perf_counter() - t0) * 1000)
