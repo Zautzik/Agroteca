@@ -138,6 +138,28 @@ uv run uvicorn agroteca.api:app --host 127.0.0.1 --port 8000 --loop asyncio:Sele
 Verified on Windows 11: startup completes, the pool opens, and `/health`, `/stats` and
 `/ask/stream` all serve. Linux and the container are unaffected and need no flag.
 
+**This is a development convenience, not a way to run the app.** The flag trades one failure for
+a subtler one. `ProactorEventLoop` is Windows' scalable IOCP backend; `SelectorEventLoop` is the
+legacy `select()` one, which scans its descriptor set linearly and is capped. Sockets that
+accumulate faster than Windows retires them from `TIME_WAIT` will eventually exhaust it.
+
+Observed, not theorised: a single `/ask/stream` request running ~20 minutes on CPU, with the web
+page open and polling `/health` every 20s, produced ~279 short-lived connections and killed the
+server outright:
+
+```
+OSError: [WinError 10055] ... the system lacked sufficient buffer space or a queue was full
+  File "...\selectors.py", line 314, in _select
+    r, w, x = select.select(r, w, w, timeout)
+```
+
+The request had already returned `200` and streamed its first frames; the process died mid-stream,
+so the client saw a truncated body (`curl` exit 18). Nothing in this app leaks the sockets — the
+backend simply doesn't scale to them.
+
+Use the flag for a quick look at the UI or a short request. For anything long-running, concurrent,
+or user-facing, run the container — Linux uses `epoll` and has none of this.
+
 ## Operational notes
 
 - **Readiness.** Startup warms both models and opens the pool; the process serves only after
