@@ -118,6 +118,26 @@ uv run uvicorn agroteca.api:app --host 0.0.0.0 --port 8000
 
 Put a reverse proxy (Caddy / nginx) in front for TLS. `--reload` is dev-only.
 
+### Running natively on Windows
+
+The command above fails on native Windows with `Psycopg cannot use the 'ProactorEventLoop' to
+run in async mode`, and the pool then times out. That is not a bug in this app: uvicorn
+*hardcodes* `ProactorEventLoop` on win32 (`uvicorn/loops/asyncio.py`), which it needs for
+subprocess support, and psycopg's async mode requires a selector loop. Setting the asyncio
+event-loop policy yourself does nothing, because uvicorn passes its own `loop_factory` to
+`asyncio.run()` and that bypasses the policy entirely.
+
+The fix is one flag, and no code change. Uvicorn treats an unrecognised `--loop` value as an
+import string for a custom loop factory (`uvicorn/config.py`, `Config.get_loop_factory`), so
+you can hand it the selector loop directly:
+
+```bash
+uv run uvicorn agroteca.api:app --host 127.0.0.1 --port 8000 --loop asyncio:SelectorEventLoop
+```
+
+Verified on Windows 11: startup completes, the pool opens, and `/health`, `/stats` and
+`/ask/stream` all serve. Linux and the container are unaffected and need no flag.
+
 ## Operational notes
 
 - **Readiness.** Startup warms both models and opens the pool; the process serves only after

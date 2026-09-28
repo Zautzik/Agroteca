@@ -1,45 +1,195 @@
 # Agroteca — Masterclass, Skills Inventory & Roadmap
 
-> A living study document **and** a from-first-principles study guide: what I've built, what I've
-> *learned*, where the project stands, and how to explain it clearly (Parts 1–5) — plus the
-> **full technical foundation underneath it**: the mathematics derived, the system design, and every
-> library choice with its rejected alternatives (Parts 6–9). Every **one-breath answer** is phrased
-> the way I'd say it out loud, plainly; every formula is one you can reproduce at a whiteboard.
->
-> _Status snapshot: end-to-end complete and pushed — governed corpus → measured retrieval
-> cascade → grounded/cited/abstaining generation → a **production-hardened**, **containerized**
-> streaming service → a bilingual, **dual-theme** web app, over a **unit-tested, single-source-of-truth**
-> eval. Beyond the build I ran the **embedder upgrade as a complete three-stage experiment** — a
-> mechanistic pilot with a control, a cheap re-chunk probe, and a full e5-large re-index — and let it
-> **disprove my own hypothesis**. Then I rebuilt serving on `psycopg_pool.AsyncConnectionPool` +
-> FastAPI dependency injection, moved the embedder/reranker onto `torch`/CUDA with an explicit
-> fail-fast warmup gate, and — the story worth telling — chased a 20× CPU slowdown into a **second
-> falsified hypothesis** (thread oversubscription, not the real cause) before finding the true one by
-> reading the reranker's own source instead of guessing. Then that work went in front of an actual
-> person, who found two real bugs my own tests hadn't: `/ask/stream` sent the client zero bytes —
-> not even HTTP headers — for the entire retrieval phase (fixed by moving retrieval inside the
-> streaming generator so headers flush immediately, which also required moving generation onto
-> `ollama.AsyncClient`), and a 300s read timeout calibrated before the CPU cost was known, now too
-> short for real prefill time. Both closed, plus real, backend-driven progress feedback (not a
-> fabricated percentage) replacing a purely decorative loading animation. Then I ran a deliberately
-> adversarial self-audit against three named failure vectors — VRAM/tensor leaks, DB connection
-> lifecycle under a mid-request disconnect, event-loop-blocking calls — assuming each was broken
-> and required proof otherwise. Two vectors came back clean, verified against actual third-party
-> source, not assumed. The DB question exposed a *different* real bug next to the one asked about:
-> the pooled connection releases cleanly on cancellation, but the single dedicated `torch` worker
-> thread doesn't stop running an abandoned computation, so a disconnect could silently starve every
-> later request. Fixed with admission control, which then had to route around the *previous* fix
-> (headers already flushed by the time it can fire) — closed with an NDJSON error frame instead of
-> an HTTP status. A follow-up Level 3 audit then tested four more specific claims — GIL-blocking
-> device transfers, pgvector index utilization, connection-pool poisoning, CUDA fragmentation,
-> dependency bloat — against the live system: an `EXPLAIN ANALYZE` on the real corpus confirmed the
-> HNSW index is hit, `psycopg_pool`'s actual installed source confirmed a failed query can't poison
-> the pool, and measured cold-import timing confirmed the dependency tree is lean and that startup
-> cost is the price of a warmup design already paid for deliberately. Two claims were architecturally
-> moot and declined with the reasoning on record; the fragmentation claim was half right, so a real
-> threshold-gated reclaim replaced the naive per-call version. Every claim below is backed by a
-> committed artifact. Only the public URL — a hosting-cost decision, not a code problem — remains, and it now also requires a GPU host, a cost
-> this document names rather than hides._
+On page 49 of a Chilean agronomy book, in Spanish, there is a sentence naming the French walnut
+cultivars a nursery in Nos was selling in 1928. If that happens to be the thing you need to know,
+the answer exists — and you will almost certainly never find it.
+
+This project is a machine for finding that sentence. And, more importantly, a machine that will tell
+you when the sentence isn't there.
+
+**Part 0 is the whole story in plain language** — no background assumed, nothing skipped. It's the
+one to read if you want to understand what was actually built and why it works. Everything after it
+goes deeper: the war stories in full (Part 1), the numbers (Part 2), the component-by-component
+teardown (Part 4), the mathematics derived from scratch (Part 6), the architecture (Part 7), and
+every library choice with the alternatives it beat (Part 8).
+
+Two promises about what follows. Every number in it came from a measurement, not an impression — and
+where a measurement embarrassed me, it's still here, including the experiment that proved my own
+prediction wrong and the bug a stranger found in code I'd already called finished.
+
+---
+
+## Part 0 — The whole thing, in plain language
+
+### Why not just ask a chatbot?
+
+Ask a general-purpose AI about that 1928 nursery and it will tell you something. It will sound
+confident and specific. It may also be entirely invented, because a language model's instinct when
+it doesn't know is to produce the most plausible-looking sentence, not to stop.
+
+For agronomy that's worse than useless. Someone deciding what to plant on real land deserves either a
+real answer with the page number attached, or an honest *"that's not in here."* Everything in this
+system exists to make those the only two possible outcomes.
+
+The technique is called RAG — retrieval-augmented generation. The idea is almost embarrassingly
+simple: **don't ask the AI what it knows. Go find the relevant pages first, hand them over, and tell
+it to answer using only those.** The AI stops being an oracle and becomes something more like a
+research assistant who isn't allowed to work from memory.
+
+Which moves the entire problem. The answer is now only as good as the pages you found. Finding the
+right pages *is* the hard part, and it's where nearly all the engineering went.
+
+### Turning meaning into geography
+
+Here's the idea the whole thing rests on, and it's genuinely lovely.
+
+You can teach a model to convert any piece of text into a list of numbers — a coordinate. Not
+random: it's trained so that **texts meaning similar things land near each other**. "How much rain
+can I catch off a roof?" and "rainwater harvesting yield per square metre" end up as neighbours,
+despite sharing almost no words. Meaning becomes *location*.
+
+Do that to all 10,330 paragraph-sized pieces of the library, and the library becomes a map. Answering
+a question turns into a geometry problem: convert the question into a coordinate, then look around
+that spot.
+
+That's what "embedding" means, and it's why this kind of search understands paraphrase in a way
+keyword search never has.
+
+### Where the beautiful idea falls over
+
+The map has a blind spot, and it's a sharp one.
+
+One of the test questions asks which alfalfa variety was used in a trial. The answer is `WL-323` — a
+cultivar code. To a model trained on meaning, `WL-323` looks like every other cultivar code in
+existence. They all mean roughly "a varietal designation," so they all land in the same
+neighbourhood. The map is superb at *gist* and hopeless at *exact strings*.
+
+Which is precisely what old-fashioned keyword search is good at. It doesn't know what `WL-323`
+means, and doesn't need to — it matches the characters.
+
+So the obvious move is to run both and combine them. Except they don't speak the same language:
+meaning-search returns a similarity between 0 and 1, keyword-search returns an unbounded relevance
+score. Adding them is like adding a temperature to a phone number.
+
+The fix is a small piece of cleverness called Reciprocal Rank Fusion, and it works by **throwing the
+scores away entirely.** Keep only the running order. Something both methods rank reasonably well
+beats something only one method adores. No calibration, no tuning, no comparing incomparable units.
+
+### The specialist who reads slowly
+
+Even combined, both methods share a limitation: they look at your question and a paragraph
+*separately*, then compare the results. Nobody ever reads the two side by side.
+
+A different kind of model will. Hand it the question and one paragraph *together* and it reads them
+as a pair, letting every word of your question weigh against every word of the text. It's markedly
+better at telling "genuinely answers this" from "is vaguely about this subject."
+
+It is also slow enough that running it across 10,330 paragraphs would be absurd.
+
+So it doesn't. The cheap wide search takes 10,330 candidates down to about 20, and only then does the
+slow careful reader look at those 20 and pick the best 5. **Cheap and broad, then expensive and
+sharp.** That shape — a cascade — is how essentially every large-scale search system works, and the
+reason is just economics: you can afford real scrutiny once you've earned the right to apply it to
+almost nothing.
+
+Then those 5 paragraphs go to the language model with three standing rules: answer *only* from
+these; name your source after each claim; and if the answer isn't in there, say one exact sentence
+saying so, and nothing else.
+
+That last rule is the one the project is really about.
+
+### Why measuring came first
+
+Most demos of this kind get built, tried on three questions that happen to work, and shipped.
+
+This one started at the other end. Before any of the machinery existed, there were 22 questions with
+hand-verified answers — deliberately awkward ones. Questions needing an exact code. Questions phrased
+in Spanish whose answer sits in an English book. And two questions whose answers are *deliberately
+not in the library at all*, to catch the system inventing things.
+
+Having that first changes what the work even is. Every idea afterwards became a measurement rather
+than an opinion. Meaning-search alone got **35%** of answers into the top five. Fusing it with
+keyword search: **45%**. Adding the slow careful reader: **75%**.
+
+And one awkward result sits inside that tidy progression, which is worth not smoothing over: keyword
+search *by itself* scored **50%** — better than the 45% I got by combining it with meaning-search.
+Fusing the two diluted the stronger one. That's a real and somewhat annoying property of rank fusion,
+and it's precisely why the project didn't stop there; the careful reader is what decisively won.
+
+There's a subtler measurement lesson too. "In the top five" is a forgiving bar — it can't see whether
+the answer came first or fifth. Scoring *first place* separately told the real story: that number
+went from **15% to 75%**. The careful reader wasn't finding answers much more often. It was taking
+answers already in the pile and moving them to the top — and the headline metric had been almost
+blind to its single best component.
+
+That's the recurring lesson of the whole project: you get the result your metric is capable of
+seeing.
+
+### Six things that went wrong, which is the interesting part
+
+**The embedder that only read the first paragraph.** Text is fed to these models in chunks, and the
+model I used silently ignores anything past roughly its first 128 word-pieces — while I was feeding
+it chunks four times that long. I found it with a nasty little test: take two passages that share an
+opening but then diverge completely — one continues about tilapia farming, the other about
+astrophysics — and embed both. They came back *identical*. Same coordinate, to four decimal places.
+The model had never seen the parts that differed. Roughly three-quarters of every chunk was invisible.
+
+**The obvious fix that made things worse.** So: use smaller chunks, so nothing gets ignored. It
+worked exactly as predicted — the system found the right *document* far more often, 65% → 90%. And
+the end-to-end answer quality *fell*, 75% → 60%. Smaller chunks meant four times as many of them,
+each carrying less context, and the careful reader had less to work with. The intuitive fix was a
+real regression, and only the measurement caught it. It wasn't shipped.
+
+**The prediction that was wrong.** The truncation discovery pointed at an obvious culprit: a better
+embedding model would fix the remaining failures. I ran the full seven-hour rebuild to find out.
+Dense retrieval more than doubled. The final answer quality moved from 0.75 to 0.80 — almost
+nothing. Why? Because the careful reader had been quietly compensating for the weak model all along.
+A better model didn't raise the ceiling; it just moved the work earlier in the pipeline. And the
+specific failures I'd bet it would fix? Untouched. All three were cases of a Spanish question whose
+answer lived in English — a different problem entirely, needing a different fix: translate the
+question and search in both languages. That recovered one of the three. The other two failed because
+the small translator mangled the agronomy vocabulary, turning *siembra* into "tillage" — a fixable
+vocabulary problem rather than an architectural wall, but not fixed yet. The expensive experiment's
+real value was redirecting me, by being wrong.
+
+**The label that was wrong, not the model.** One test flagged the system for inventing an answer.
+Before "fixing" anything, I read the retrieved pages. The system was right. My own answer key was
+wrong. An evaluation is only ever as good as the humans who wrote it, and the instinct to trust the
+metric over the evidence would have had me damaging working code.
+
+**The bug that needed a stranger.** I'd tested the streaming rewrite thoroughly — command line,
+automated tests, full round trips. Someone else opened it and got an instant network error. The
+server was doing all its slow work *before* sending anything at all, so for several minutes the
+browser received not one byte — not even a header — and gave up. My own testing never caught it
+because I'd sat patiently watching a terminal, and a browser is far less patient than I am. Your own
+testing and someone else's first click are not the same test.
+
+**The confident diagnosis that survived its own fix.** After moving to a different inference backend,
+one operation went from 25 seconds to over 500. I had a tidy, well-documented explanation involving
+thread contention. I built the fix. The number didn't move at all. Rather than ship it anyway, I read
+the library's actual source and found my explanation had been wrong from the start — the real cause
+was that my benchmark had been feeding it short toy sentences instead of real paragraphs. A fix that
+doesn't move the number hasn't confirmed anything.
+
+### What it costs, said plainly
+
+The careful-reader step takes about 500 seconds per question on an ordinary processor. That's not a
+bug — it's an honest measurement of running this class of model without a graphics card. The graphics-card
+path is built and the code runs, but I should be precise about what I have and haven't measured: I've
+measured the slow number, not the fast one. Expecting a large speedup is reasonable; quoting a
+specific figure I haven't observed would be exactly the kind of confident-sounding invention this
+whole project exists to avoid. This is the one thing standing between the project and a public
+address, and it's a hosting bill rather than a code problem.
+
+The citation score reads 10 out of 20, which undersells the model: it cites reliably, just not always
+in the exact shape the scoring pattern expects — sometimes the filename sits outside the brackets,
+sometimes it uses square ones. The bug there is in the ruler, not the thing being measured.
+
+And 22 questions is a small sample. A single question moves the headline by five points. Differences
+of one or two questions are directional, not conclusive, and are described that way throughout.
+
+None of which is hidden, because a system whose entire selling point is that it would rather admit
+ignorance than bluff should probably hold its own documentation to the same standard.
 
 ---
 
@@ -128,7 +278,7 @@ These matter *more* than the table above. Anyone can be taught `tsvector`; these
 | — | Eval-code hardening: single-source `_scoring` + 9 unit tests | ✅ | assumptions pinned (reranker direction, RRF, tokenizer, MRR) |
 | — | **Embedder experiment** (mechanistic pilot → re-chunk probe → full e5-large re-index) | ✅ | e5 *dense* **0.35 → 0.75**; final 0.75 → 0.80; hypothesis **falsified** (cross-lingual misses stubborn) |
 | — | **Containerized** (two-stage `uv`, non-root, health-checked) + **resumable ingest** (`--resume`) | ✅ | governance holds at the image layer; long re-index now restartable in batches |
-| — | **Async serving** — `psycopg_pool.AsyncConnectionPool` + FastAPI DI, retrieval released before generation | ✅ | verified live; found and fixed a Windows-only `asyncio` event-loop incompatibility |
+| — | **Async serving** — `psycopg_pool.AsyncConnectionPool` + FastAPI DI, retrieval released before generation | ✅ | verified live; root-caused a Windows-only `asyncio` event-loop incompatibility to uvicorn's hardcoded `ProactorEventLoop`, closed with `--loop asyncio:SelectorEventLoop` (no code change) |
 | — | **GPU inference pivot** — `torch`/CUDA embedder + reranker, fail-fast device warmup, weights baked into the image | ✅ | GPU path built and code-verified; CPU path measured at **~500 s/rerank** — a named, honest cost |
 | — | **`eval/eval_pipeline.py`** — concurrent, HTTP-level eval harness against a new retrieval-only `/retrieve` route | ✅ | pydantic-validated golden set; live-verified against a real server |
 | — | **`docker compose up`** — the app wired into compose alongside the DB, not just documented | ✅ | config-validated; a claim in a doc is a promise a stranger will test |
@@ -264,7 +414,7 @@ The real question underneath all of it: can you take a working model and *serve 
 The eval is the project's thesis, so I hardened the *measurement code* to the same standard as the system:
 
 - **One source of truth** — every metric derives from a single primitive, `answer_rank` (the 1-based position of the answer chunk); `answer@1`, `answer@k`, `document@k`, and MRR all fall out of it, so a new metric is a one-file change that can't drift across the eval scripts.
-- **The assumptions are unit-tested** — nine pytest cases pin the load-bearing, silent-failure-prone logic: that a higher cross-encoder score truly means more relevant (the `reverse=True` bet — measured +1.25 vs −3.72), the RRF formula and its first-seen-row rule, the OR-tokenizer (including exact-code preservation), and the rank-derived metrics.
+- **The assumptions are unit-tested** — nine pytest cases pin the load-bearing, silent-failure-prone logic: that a higher cross-encoder score truly means more relevant (the `reverse=True` bet — the test asserts the relevant pair outscores the irrelevant one, on jina's `[0, 1]` sigmoid scale), the RRF formula and its first-seen-row rule, the OR-tokenizer (including exact-code preservation), and the rank-derived metrics.
 - **The labels are stress-tested** — a uniqueness check confirms each `must_contain` phrase identifies its answer chunk; when it flagged one, I *inspected* and found the recurrence benign (the answer is genuinely stated three times) and recorded that, rather than degrade a correct label.
 - **The free lever is measured before the expensive one** — before reaching for a heavier embedder I measured hybrid `answer@N` (the reranker's recall ceiling) across pool sizes; it's flat, and four of five remaining misses aren't in the top-60 at all. So the embedder is the *measured* next lever — a bigger pool is not.
 
@@ -601,7 +751,7 @@ MRR      = (1/|Q|) · Σ RR                        # mean reciprocal rank
 
 ### 6.9 — The reranker's score, and small-sample statistics
 
-- The cross-encoder emits a **logit** — higher = more relevant. I sort `reverse=True`, and that assumption is **unit-tested** (a relevant pair scored `+1.25`, an irrelevant one `−3.72`): a flipped comparator wouldn't crash, it would *silently* invert ranking.
+- The cross-encoder emits a **sigmoid-normalized score in `[0, 1]`** — higher = more relevant. I sort `reverse=True`, and that assumption is **unit-tested** (`tests/test_scoring.py` pins a relevant pair above an irrelevant one): a flipped comparator wouldn't crash, it would *silently* invert ranking. Measured across the full golden set (`eval/calibrate_abstention.py`), rank-1 scores for questions the cascade answers correctly land in a **0.618–0.905** band (median 0.812), while the two genuine no-answer questions top out at **0.413** — a ~0.20 empty gap that separates "retrieval found nothing" from "retrieval worked". The gap does *not* run the other way: two failed-but-answerable questions score 0.614 and 0.743, inside the healthy band, so a high score is not evidence of a good answer. *(This previously read "emits a logit," with example values of `+1.25` and `−3.72` — that described the earlier `fastembed`/ONNX backend. The current `jina-reranker-v2` returns a probability, as the test's own comment states and as the observed range confirms. Corrected rather than quietly deleted, because the shape of the number changes how you reason about thresholds on it.)*
 - **Statistical honesty (n = 20):** one question is `0.05` of `answer@5`. A Wald 95% CI on a proportion `p̂ = 0.75, n = 20` is roughly `±0.19` — **wide**. So I treat single-question cross-config differences as **directional**, trust multi-question gaps (like a 4-doc `doc@5` swing) as **signal**, and say so out loud. *Reporting the confidence interval you can't shrink is the honest version of statistical rigor.*
 
 ---
