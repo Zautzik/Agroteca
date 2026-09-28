@@ -12,47 +12,60 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* ── "Field Station" ────────────────────────────────────────────────────────
+     Precision instruments pointed at living things. The botany stays; the softness
+     goes. Hairline rules and near-square corners instead of pillowy cards, a
+     structural stem rule instead of a centred logo, and chlorophyll green treated
+     as a signal colour rather than a pastel wash. Data surfaces wear mono. */
   :root {
-    /* Light — "Forest" (hex fallback first, then OKLCH for modern browsers) */
-    --bg-0: #f6f3eb; --bg-0: oklch(97% 0.012 95);
-    --bg-1: #fdfcf7; --bg-1: oklch(99% 0.008 95);
-    --bg-2: #eae4d4; --bg-2: oklch(93% 0.018 95);
-    --border: #d5cfbd; --border: oklch(85% 0.02 100);
-    --text: #2a3226; --text: oklch(24% 0.03 140);
-    --text-dim: #5b6551; --text-dim: oklch(45% 0.03 130);
-    --accent: #2c7a48; --accent: oklch(45% 0.13 150);
-    --accent-2: #8a6338; --accent-2: oklch(48% 0.09 50);
-    --shadow: 0 14px 40px rgba(52, 42, 20, 0.10); --glow: rgba(44,122,72,.15);
+    /* Light — cool paper with a green cast, not cream */
+    --bg-0: #f2f4ef; --bg-0: oklch(96.5% 0.008 140);
+    --bg-1: #fbfcfa; --bg-1: oklch(99% 0.004 140);
+    --bg-2: #e3e8df; --bg-2: oklch(92% 0.014 140);
+    --border: #cbd3c5; --border: oklch(85% 0.016 140);
+    --rule: #b3bfab; --rule: oklch(78% 0.02 140);
+    --text: #1a2119; --text: oklch(20% 0.022 145);
+    --text-dim: #5a6657; --text-dim: oklch(46% 0.022 145);
+    --accent: #1f7a3d; --accent: oklch(48% 0.155 148);
+    --accent-2: #9a5a24; --accent-2: oklch(50% 0.115 55);
+    --shadow: 0 1px 0 var(--border); --glow: oklch(48% 0.155 148 / .16);
     --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
-    /* legacy names aliased onto the premium palette — keeps every existing selector working */
+    --grid: oklch(48% 0.155 148 / .045);
+    /* legacy names aliased onto the palette — keeps every existing selector working */
     --bg: var(--bg-0); --card: var(--bg-1); --field: var(--bg-1); --chip-bg: var(--bg-2);
     --ink: var(--text); --muted: var(--text-dim);
     --line: var(--border); --chip-border: var(--border); --toggle-border: var(--border);
     --green: var(--accent); --green-deep: var(--text);
   }
   :root[data-theme="dark"] {
-    /* Dark — "Clair de Lune" (moonlit, cool) */
-    --bg-0: #121a1f; --bg-0: oklch(16% 0.025 210);
-    --bg-1: #18222a; --bg-1: oklch(20% 0.03 205);
-    --bg-2: #212d35; --bg-2: oklch(25% 0.03 205);
-    --border: #37444c; --border: oklch(34% 0.03 200);
-    --text: #e5eaed; --text: oklch(93% 0.012 200);
-    --text-dim: #a1abb0; --text-dim: oklch(70% 0.02 195);
-    --accent: #c3cfe9; --accent: oklch(88% 0.05 235);
-    --accent-2: #82c398; --accent-2: oklch(72% 0.1 150);
-    --shadow: 0 16px 44px rgba(0, 0, 0, 0.5); --glow: rgba(130,195,152,.20);
+    /* Dark — near-black soil, chlorophyll signal. The old dark theme drifted to a pale
+       blue accent, which quietly abandoned the nature identity exactly where the
+       interface is most dramatic; green carries through now. */
+    --bg-0: #0d100d; --bg-0: oklch(14% 0.01 145);
+    --bg-1: #141814; --bg-1: oklch(17.5% 0.012 145);
+    --bg-2: #1d231c; --bg-2: oklch(22% 0.016 145);
+    --border: #2c352b; --border: oklch(29% 0.018 145);
+    --rule: #3d4a3b; --rule: oklch(38% 0.024 145);
+    --text: #e8ece6; --text: oklch(93% 0.01 145);
+    --text-dim: #9aa697; --text-dim: oklch(70% 0.018 145);
+    --accent: #5fd483; --accent: oklch(79% 0.17 150);
+    --accent-2: #d9a066; --accent-2: oklch(76% 0.11 65);
+    --shadow: 0 1px 0 var(--border); --glow: oklch(79% 0.17 150 / .18);
+    --grid: oklch(79% 0.17 150 / .05);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg-0: #121a1f; --bg-0: oklch(16% 0.025 210);
-      --bg-1: #18222a; --bg-1: oklch(20% 0.03 205);
-      --bg-2: #212d35; --bg-2: oklch(25% 0.03 205);
-      --border: #37444c; --border: oklch(34% 0.03 200);
-      --text: #e5eaed; --text: oklch(93% 0.012 200);
-      --text-dim: #a1abb0; --text-dim: oklch(70% 0.02 195);
-      --accent: #c3cfe9; --accent: oklch(88% 0.05 235);
-      --accent-2: #82c398; --accent-2: oklch(72% 0.1 150);
-      --shadow: 0 16px 44px rgba(0, 0, 0, 0.5); --glow: rgba(130,195,152,.20);
+      --bg-0: #0d100d; --bg-0: oklch(14% 0.01 145);
+      --bg-1: #141814; --bg-1: oklch(17.5% 0.012 145);
+      --bg-2: #1d231c; --bg-2: oklch(22% 0.016 145);
+      --border: #2c352b; --border: oklch(29% 0.018 145);
+      --rule: #3d4a3b; --rule: oklch(38% 0.024 145);
+      --text: #e8ece6; --text: oklch(93% 0.01 145);
+      --text-dim: #9aa697; --text-dim: oklch(70% 0.018 145);
+      --accent: #5fd483; --accent: oklch(79% 0.17 150);
+      --accent-2: #d9a066; --accent-2: oklch(76% 0.11 65);
+      --shadow: 0 1px 0 var(--border); --glow: oklch(79% 0.17 150 / .18);
+      --grid: oklch(79% 0.17 150 / .05);
     }
   }
 
@@ -63,51 +76,55 @@
     background: var(--bg);
     min-height: 100vh; line-height: 1.6; -webkit-font-smoothing: antialiased; transition: background-color .3s, color .3s;
   }
+  /* Planting rows, not a mood-lit blur: a crisp ruled field that reads as graph paper
+     at a glance and as sown lines if you look. Static on purpose — a breathing gradient
+     is atmospheric, and atmosphere is the opposite of instrument. */
   body::before {
-    content: ""; position: fixed; inset: -15%; z-index: -1; pointer-events: none;
-    background:
-      radial-gradient(38% 44% at 24% 18%, var(--bg-2) 0%, transparent 68%),
-      radial-gradient(42% 40% at 80% 26%, var(--bg-2) 0%, transparent 70%);
-    opacity: .6; filter: blur(30px);
-    animation: breathe 16s ease-in-out infinite;
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
+    background-size: 34px 100%;
+    mask-image: linear-gradient(to bottom, #000 0%, transparent 62%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 62%);
   }
-  @keyframes breathe { 0%, 100% { transform: scale(1) translateY(0); opacity: .45; } 50% { transform: scale(1.07) translateY(-1.5%); opacity: .62; } }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 52px 20px 90px; }
-  :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 8px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 44px 20px 90px; }
+  :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 2px; }
 
-  .controls { position: fixed; top: 20px; right: 20px; z-index: 20; display: flex; align-items: center; gap: 10px; }
-  .iconbtn { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--toggle-border); background: var(--card); color: var(--ink); font-size: 19px; cursor: pointer; box-shadow: var(--shadow); transition: transform .15s, border-color .15s; }
-  .iconbtn:hover { transform: translateY(-1px) rotate(-8deg); border-color: var(--green); }
-  .langtoggle { display: inline-flex; align-items: center; gap: 2px; background: var(--card); border: 2px solid var(--toggle-border); border-radius: 999px; padding: 6px; box-shadow: var(--shadow); }
-  .langtoggle .leaf { font-size: 20px; padding: 0 4px 0 9px; }
-  .langtoggle button { background: transparent; color: var(--muted); border: 0; border-radius: 999px; padding: 9px 16px; font-size: 15px; font-weight: 800; cursor: pointer; letter-spacing: .5px; transition: background .18s, color .18s; }
-  .langtoggle button.active { background: var(--accent); color: var(--bg-0); box-shadow: 0 3px 10px var(--glow); }
-  .langtoggle button:not(.active):hover { color: var(--green-deep); }
+  .controls { position: fixed; top: 18px; right: 18px; z-index: 20; display: flex; align-items: center; gap: 8px; }
+  .iconbtn { width: 40px; height: 40px; border-radius: 2px; border: 1px solid var(--toggle-border); background: var(--card); color: var(--ink); font-size: 17px; cursor: pointer; transition: border-color .15s, color .15s; }
+  .iconbtn:hover { border-color: var(--green); color: var(--green); }
+  .langtoggle { display: inline-flex; align-items: center; gap: 2px; background: var(--card); border: 1px solid var(--toggle-border); border-radius: 2px; padding: 3px; }
+  .langtoggle .leaf { font-size: 15px; padding: 0 5px 0 7px; opacity: .75; }
+  .langtoggle button { background: transparent; color: var(--muted); border: 0; border-radius: 1px; padding: 7px 12px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: 1px; transition: background .18s, color .18s; }
+  .langtoggle button.active { background: var(--accent); color: var(--bg-0); }
+  .langtoggle button:not(.active):hover { color: var(--green); }
 
-  header { text-align: center; margin-bottom: 32px; animation: rise .5s ease both; }
-  .logo { font-size: 44px; line-height: 1; }
-  h1 { font-family: 'Source Serif 4', Georgia, "Times New Roman", serif; font-weight: 600; font-size: 38px; margin: 8px 0 6px; color: var(--accent); letter-spacing: -0.5px; }
-  .tag { color: var(--muted); font-size: 15px; margin: 0; text-wrap: pretty; }
-  .tag em { color: var(--accent); font-style: italic; }
+  /* The stem: one vertical rule organising the whole column. Botanical and structural at
+     once, and it replaces the centred-logo-over-centred-title arrangement that makes most
+     of these pages interchangeable. */
+  header { margin-bottom: 30px; padding-left: 18px; border-left: 2px solid var(--accent); animation: rise .5s ease both; }
+  .logo { font-size: 20px; line-height: 1; opacity: .9; }
+  h1 { font-family: 'Source Serif 4', Georgia, "Times New Roman", serif; font-weight: 600; font-size: clamp(40px, 8vw, 60px); margin: 2px 0 8px; color: var(--ink); letter-spacing: -1.6px; line-height: .95; }
+  .tag { color: var(--muted); font-size: 15px; margin: 0; max-width: 54ch; text-wrap: pretty; }
+  .tag em { color: var(--accent); font-style: normal; font-weight: 600; }
 
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 22px; animation: rise .5s ease .06s both; }
-  textarea { width: 100%; border: 1px solid var(--line); border-radius: 13px; padding: 14px 16px; font-size: 16px; font-family: inherit; color: var(--ink); resize: none; overflow: hidden; min-height: 74px; background: var(--field); outline: none; transition: border-color .15s, box-shadow .15s; }
-  textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--glow); }
-  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-  button.ask { background: var(--accent); color: var(--bg-0); border: 0; border-radius: 10px; padding: 12px 24px; font-size: 15px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .05s, box-shadow .15s; }
-  button.ask:hover { filter: brightness(1.06); box-shadow: 0 6px 16px var(--glow); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 3px; padding: 20px; animation: rise .5s ease .06s both; }
+  textarea { width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 14px 15px; font-size: 16px; font-family: inherit; color: var(--ink); resize: none; overflow: hidden; min-height: 74px; background: var(--field); outline: none; transition: border-color .15s, box-shadow .15s; }
+  textarea:focus { border-color: var(--green); box-shadow: inset 2px 0 0 var(--green); }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  button.ask { background: var(--accent); color: var(--bg-0); border: 0; border-radius: 2px; padding: 12px 26px; font-size: 13px; font-weight: 700; font-family: var(--mono); letter-spacing: 1.2px; text-transform: uppercase; cursor: pointer; transition: filter .15s, transform .05s; }
+  button.ask:hover { filter: brightness(1.08); }
   button.ask:active { transform: translateY(1px); }
-  button.ask:disabled { background: var(--muted); cursor: not-allowed; box-shadow: none; opacity: .65; }
-  .surprise { background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 12px; padding: 11px 13px; font-size: 17px; cursor: pointer; transition: transform .2s, border-color .15s; }
-  .surprise:hover { transform: rotate(18deg); border-color: var(--green); }
+  button.ask:disabled { background: var(--muted); cursor: not-allowed; opacity: .55; }
+  .surprise { background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 2px; padding: 11px 13px; font-size: 16px; cursor: pointer; transition: border-color .15s; }
+  .surprise:hover { border-color: var(--green); }
   .hint { color: var(--muted); font-size: 13px; }
-  .counter { color: var(--muted); font-family: var(--mono); font-size: 12px; margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
+  .counter { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-  .chip { font-size: 13px; color: var(--green-deep); background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 999px; padding: 6px 13px; cursor: pointer; transition: transform .15s, background .15s, box-shadow .15s; }
-  .chip:hover { transform: translateY(-2px); box-shadow: 0 4px 12px var(--glow); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+  .chip { font-size: 13px; color: var(--muted); background: transparent; border: 1px solid var(--chip-border); border-radius: 2px; padding: 7px 12px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
+  .chip:hover { color: var(--green); border-color: var(--green); background: var(--chip-bg); }
 
-  .answer { margin-top: 22px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--green); border-radius: 13px; padding: 20px 22px; font-size: 16.5px; display: none; }
+  .answer { margin-top: 20px; background: var(--card); border: 1px solid var(--line); border-left: 2px solid var(--green); border-radius: 3px; padding: 20px 22px; font-size: 16.5px; display: none; }
   .answer.show { display: block; animation: rise .35s ease both; }
   .answer-text { white-space: pre-wrap; word-wrap: break-word; text-wrap: pretty; }
   .cursor { display: inline-block; width: 8px; height: 1.05em; vertical-align: text-bottom; background: var(--accent); margin-left: 1px; animation: blink 1s steps(1) infinite; }
@@ -116,35 +133,55 @@
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-  .actionbar { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
-  .seal { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--accent-2); background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 999px; padding: 5px 11px; }
-  .modelbadge { font-family: var(--mono); font-size: 11.5px; color: var(--muted); letter-spacing: .3px; }
+  .actionbar { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .seal { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--accent-2); background: transparent; border: 1px solid var(--accent-2); border-radius: 2px; padding: 4px 9px; }
+  .modelbadge { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: .3px; }
   .spacer { margin-left: auto; }
-  .act { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 9px; padding: 6px 11px; font-size: 13px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; font-family: inherit; }
-  .act:hover { color: var(--green-deep); border-color: var(--green); }
+  .act { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 2px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; transition: color .15s, border-color .15s, background .15s; font-family: inherit; }
+  .act:hover { color: var(--green); border-color: var(--green); }
   .act.on { color: var(--green); border-color: var(--green); background: var(--chip-bg); }
 
-  .empty { text-align: center; padding: 12px 0 6px; }
-  .empty-icon { font-size: 46px; }
-  .empty-title { font-weight: 700; color: var(--green-deep); margin-top: 8px; }
-  .empty-text { color: var(--muted); font-size: 14px; margin-top: 4px; max-width: 44ch; margin-left: auto; margin-right: auto; text-wrap: pretty; }
+  /* Abstention is a first-class outcome here, not an error state — so it gets the same
+     structural treatment as an answer, left rule included, rather than a shrugging
+     centred icon. */
+  .empty { padding: 4px 0 2px; }
+  .empty-icon { font-size: 26px; line-height: 1; opacity: .8; }
+  .empty-title { font-family: 'Source Serif 4', Georgia, serif; font-size: 23px; font-weight: 600; color: var(--ink); margin-top: 8px; letter-spacing: -.3px; }
+  .empty-text { color: var(--muted); font-size: 14.5px; margin-top: 6px; max-width: 52ch; text-wrap: pretty; }
+
+  /* ── the no-answer off-ramp ─────────────────────────────────────────────── */
+  .offramp { margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .offramp-note { color: var(--muted); font-size: 13.5px; margin: 9px 0 11px; max-width: 56ch; text-wrap: pretty; }
+  .topicchip { font-size: 13px; color: var(--ink); background: var(--chip-bg); border: 1px solid var(--chip-border); border-left: 2px solid var(--accent); border-radius: 2px; padding: 7px 12px; cursor: pointer; font-family: inherit; transition: border-color .15s, color .15s; }
+  .topicchip:hover { color: var(--green); border-color: var(--green); }
+  /* Backfilled from corpus-wide counts rather than from this query's results — the muted
+     stem says "generally available" instead of "related to what you asked", because
+     claiming relevance we didn't measure is the failure mode this feature exists to avoid. */
+  .topicchip.general { border-left-color: var(--rule); color: var(--muted); }
+  .offramp-doc { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .offramp-doc:last-child { border-bottom: 0; }
+  .offramp-doc .n { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .offramp-doc .t { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .offramp-doc .s { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--accent-2); font-variant-numeric: tabular-nums; }
 
   .sources { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
-  .sources > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; user-select: none; }
+  .sources > summary { cursor: pointer; color: var(--muted); font-family: var(--mono); font-size: 10.5px; letter-spacing: 1.2px; text-transform: uppercase; list-style: none; user-select: none; }
   .sources > summary::-webkit-details-marker { display: none; }
-  .sources > summary::before { content: '▸ '; }
-  .sources[open] > summary::before { content: '▾ '; }
-  .sources > summary:hover { color: var(--green-deep); }
+  .sources > summary::before { content: '+ '; }
+  .sources[open] > summary::before { content: '− '; }
+  .sources > summary:hover { color: var(--green); }
   .latency { color: var(--muted); font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  .lowconf { color: var(--accent); font-size: 12.5px; margin: 10px 0 2px; }
-  .src { margin-top: 13px; }
+  .lowconf { color: var(--accent-2); font-size: 12px; margin: 10px 0 2px; font-family: var(--mono); }
+  .src { margin-top: 14px; padding-left: 11px; border-left: 1px solid var(--line); }
   .src-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .src-name { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src-score { margin-left: auto; color: var(--accent-2); font-family: var(--mono); font-size: 11.5px; }
-  .scorebar { height: 4px; background: var(--chip-border); border-radius: 999px; margin: 5px 0 6px; overflow: hidden; }
-  .scorebar > span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; }
+  .src-score { margin-left: auto; color: var(--accent-2); font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .scorebar { height: 2px; background: var(--chip-border); margin: 6px 0; overflow: hidden; }
+  .scorebar > span { display: block; height: 100%; background: var(--accent-2); }
   .src-snip { color: var(--muted); font-size: 12.5px; line-height: 1.5; text-wrap: pretty; }
-  .tier { font: 600 9.5px var(--mono); letter-spacing: .6px; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; flex: none; }
+  .tier { font: 600 9px var(--mono); letter-spacing: .8px; text-transform: uppercase; padding: 3px 7px; border-radius: 1px; border: 1px solid transparent; flex: none; }
   .tier-open { color: var(--bg-0); background: var(--accent-2); }
   .tier-syn { color: var(--bg-0); background: var(--text-dim); }
   .tier-local { color: var(--text-dim); background: transparent; border-color: var(--border); }
@@ -201,6 +238,26 @@
   .modal-head span { font-weight: 700; color: var(--green-deep); }
   .kbd-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; font-size: 13.5px; color: var(--muted); }
   kbd { background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 6px; padding: 2px 8px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+
+  /* Phone width. The controls are position:fixed at the top-right, and the header is now a
+     left-aligned block rather than a centred one, so the two share the top band instead of
+     stacking -- the column needs to start below them rather than beside them. */
+  @media (max-width: 520px) {
+    .wrap { padding: 74px 16px 72px; }
+    .controls { top: 14px; right: 14px; gap: 6px; }
+    .iconbtn { width: 36px; height: 36px; font-size: 15px; }
+    .langtoggle button { padding: 6px 9px; font-size: 11px; }
+    .langtoggle .leaf { display: none; }
+    header { padding-left: 14px; }
+    h1 { font-size: 38px; letter-spacing: -1px; }
+    .card { padding: 16px; }
+    .answer { padding: 16px 15px; }
+    /* One stone per backend phase still has to fit without a sideways scroll. */
+    .stone { width: 44px; }
+    .stone-icon { font-size: 21px; }
+    .stone-label { font-size: 9px; }
+    .stone-path { width: 12px; margin: 0 -3px 17px; }
+  }
 
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
 </style>
@@ -266,6 +323,10 @@
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
       grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar', share: 'Enlace', shareCopied: 'Enlace copiado',
       abstainTitle: 'Fuera del corpus', abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
+      offrampCoversLabel: 'Lo que sí cubre este corpus',
+      offrampCoversNote: 'La búsqueda no encontró nada cercano a tu pregunta. Estos son los temas con material disponible — tocá uno para empezar por ahí.',
+      offrampFoundLabel: 'Lo más cercano que encontró',
+      offrampFoundNote: 'Se recuperaron estos documentos, pero ninguno respondía tu pregunta directamente. Quizá valga la pena preguntar de otro modo, o sobre uno de estos temas.',
       sourcesLabel: 'Fuentes recuperadas', lowConfidence: 'Coincidencia débil — lee con cautela.',
       stopLabel: 'Detener', stopped: 'Detenido',
       historyTitle: 'Historial', historyEmpty: 'Aún no hay preguntas.', helpTitle: 'Atajos de teclado',
@@ -288,6 +349,10 @@
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
       grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export', share: 'Link', shareCopied: 'Link copied',
       abstainTitle: 'Outside the corpus', abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
+      offrampCoversLabel: 'What this corpus does cover',
+      offrampCoversNote: 'The search found nothing close to your question. These are the subjects with material behind them — tap one to start there instead.',
+      offrampFoundLabel: 'The closest it found',
+      offrampFoundNote: 'These documents came back, but none of them answered your question directly. It may be worth asking differently, or about one of these subjects.',
       sourcesLabel: 'Retrieved sources', lowConfidence: 'Weak match — read with care.',
       stopLabel: 'Stop', stopped: 'Stopped',
       historyTitle: 'History', historyEmpty: 'No questions yet.', helpTitle: 'Keyboard shortcuts',
@@ -392,31 +457,79 @@
     return '<details class="sources"><summary>' + t.sourcesLabel + ' · ' + meta.sources.length + ' · <span class="latency">' + fmtMs(meta.retrieval_ms) + '</span></summary>' + low + rows + '</details>';
   }
 
-  function finalize(text, meta, doneMsg) {
+  /* The off-ramp for an abstention. Everything rendered here came from the server's
+     `no_answer` frame, which is built only from chunks retrieval actually returned and
+     real corpus metadata — nothing is a model-generated guess at a better question.
+     `kind` is deliberately coarse: calibration (eval/calibrate_abstention.py) showed a low
+     score reliably means nothing relevant surfaced, but a HIGH score proves nothing, so
+     the copy never tells the reader retrieval succeeded. */
+  function renderOfframp(na) {
+    if (!na) return '';
+    const t = I18N[currentLang];
+    const noMatch = na.kind === 'no_match';
+    let html = '<div class="offramp"><div class="eyebrow">'
+      + (noMatch ? t.offrampCoversLabel : t.offrampFoundLabel) + '</div>'
+      + '<p class="offramp-note">' + (noMatch ? t.offrampCoversNote : t.offrampFoundNote) + '</p>';
+    if (!noMatch && na.documents && na.documents.length) {
+      html += na.documents.map((d, i) =>
+        '<div class="offramp-doc"><span class="n">' + String(i + 1).padStart(2, '0')
+        + '</span><span class="t">' + esc(d.source) + '</span><span class="s">'
+        + (d.score != null ? d.score.toFixed(2) : '') + '</span></div>').join('');
+    }
+    if (na.topics && na.topics.length) {
+      html += '<div class="chips">' + na.topics.map(tp =>
+        '<button class="topicchip' + (tp.from_retrieval ? '' : ' general') + '" data-topic="'
+        + esc(tp.label) + '">' + esc(tp.label) + '</button>').join('') + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function finalize(text, meta, doneMsg, noAnswer) {
     const t = I18N[currentLang];
     const main = answer.querySelector('.answer-main');
-    if (text.toLowerCase().includes(ABSTAIN)) {
-      main.innerHTML = '<div class="empty"><div class="empty-icon" aria-hidden="true">🧺</div><div class="empty-title">' + t.abstainTitle + '</div><div class="empty-text">' + t.abstainText + '</div></div>';
-    } else {
-      const bar = document.createElement('div');
-      bar.className = 'actionbar';
-      bar.innerHTML = (hasCitation(text) ? '<span class="seal">🌿 ' + t.grounded + '</span>' : '')
-        + '<span class="modelbadge">qwen2.5:3b · local</span><span class="spacer"></span>'
-        + '<button class="act" data-a="copy">📋 ' + t.copy + '</button>'
+    const abstained = text.toLowerCase().includes(ABSTAIN);
+    if (abstained) {
+      main.innerHTML = '<div class="empty"><div class="empty-icon" aria-hidden="true">🧺</div><div class="empty-title">'
+        + t.abstainTitle + '</div><div class="empty-text">' + t.abstainText + '</div></div>'
+        + renderOfframp(noAnswer);
+      main.querySelectorAll('.topicchip').forEach(c => {
+        c.onclick = () => { q.value = c.dataset.topic; onInput(); q.focus(); q.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+      });
+    }
+    const bar = document.createElement('div');
+    bar.className = 'actionbar';
+    // The vote buttons used to exist only on the answered branch, so an abstention — the
+    // single highest-signal thing this system does — recorded nothing at all. They render
+    // on both paths now; eval/harvest_feedback.py turns what they capture into golden-set
+    // candidates, which is the only way the n=2 no-answer sample ever grows.
+    bar.innerHTML = (!abstained && hasCitation(text) ? '<span class="seal">🌿 ' + t.grounded + '</span>' : '')
+      + '<span class="modelbadge">qwen2.5:3b · local</span><span class="spacer"></span>'
+      + (abstained ? '' : '<button class="act" data-a="copy">📋 ' + t.copy + '</button>'
         + '<button class="act" data-a="share">🔗 ' + t.share + '</button>'
-        + '<button class="act" data-a="export">⬇ ' + t.exportLabel + '</button>'
-        + '<button class="act" data-a="up" aria-label="good">👍</button><button class="act" data-a="down" aria-label="bad">👎</button>';
-      main.appendChild(bar);
+        + '<button class="act" data-a="export">⬇ ' + t.exportLabel + '</button>')
+      + '<button class="act" data-a="up" aria-label="good">👍</button><button class="act" data-a="down" aria-label="bad">👎</button>';
+    main.appendChild(bar);
+    if (!abstained) {
       bar.querySelector('[data-a=copy]').onclick = (e) => { navigator.clipboard.writeText(text); const b = e.currentTarget; b.textContent = '✓ ' + t.copied; setTimeout(() => { b.textContent = '📋 ' + t.copy; }, 1600); };
       bar.querySelector('[data-a=share]').onclick = (e) => { navigator.clipboard.writeText(location.origin + '/?q=' + encodeURIComponent(lastQuestion)); const b = e.currentTarget; b.textContent = '✓ ' + t.shareCopied; setTimeout(() => { b.textContent = '🔗 ' + t.share; }, 1600); };
       bar.querySelector('[data-a=export]').onclick = () => { const md = '# ' + lastQuestion + '\n\n' + text + '\n'; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' })); a.download = 'agroteca-answer.md'; a.click(); URL.revokeObjectURL(a.href); };
-      const up = bar.querySelector('[data-a=up]'), down = bar.querySelector('[data-a=down]');
-      const vote = v => {
-        up.classList.toggle('on', v === 'up'); down.classList.toggle('on', v === 'down');
-        fetch('/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: lastQuestion, vote: v, answer_preview: text.slice(0, 200) }) }).catch(() => {});
-      };
-      up.onclick = () => vote('up'); down.onclick = () => vote('down');
     }
+    const up = bar.querySelector('[data-a=up]'), down = bar.querySelector('[data-a=down]');
+    const vote = v => {
+      up.classList.toggle('on', v === 'up'); down.classList.toggle('on', v === 'down');
+      fetch('/feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: lastQuestion, vote: v, answer_preview: text.slice(0, 200),
+          abstained: abstained,
+          kind: noAnswer ? noAnswer.kind : null,
+          top_score: noAnswer ? noAnswer.top_score : (meta && meta.sources && meta.sources.length ? meta.sources[0].score : null),
+          translated_query: meta ? (meta.translated_query || null) : null,
+          retrieved: (meta && meta.sources ? meta.sources : []).slice(0, 8).map(s => ({ source: s.source, score: s.score })),
+        }),
+      }).catch(() => {});
+    };
+    up.onclick = () => vote('up'); down.onclick = () => vote('down');
     if (meta && doneMsg) { const lat = answer.querySelector('.latency'); if (lat) lat.textContent = fmtMs(meta.retrieval_ms) + ' + ' + fmtMs(doneMsg.generation_ms); }
   }
 
@@ -517,7 +630,7 @@
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
-      let buf = '', streamEl = null, meta = null, statTextEl = null;
+      let buf = '', streamEl = null, meta = null, statTextEl = null, noAnswer = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -531,6 +644,8 @@
             setStage(msg.stage);
           } else if (msg.type === 'meta') {
             meta = msg;
+          } else if (msg.type === 'no_answer') {
+            noAnswer = msg;
           } else if (msg.type === 'token') {
             if (!streamEl) {
               firstT = Date.now();
@@ -546,7 +661,7 @@
           } else if (msg.type === 'done') {
             const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
             const st = document.getElementById('stats'); if (st) st.remove();
-            if (streamEl) finalize(streamEl.textContent, meta, msg);
+            if (streamEl) finalize(streamEl.textContent, meta, msg, noAnswer);
             saveHistory(lastQuestion);
           } else if (msg.type === 'error') {
             const cur = answer.querySelector('.cursor'); if (cur) cur.remove();

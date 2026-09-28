@@ -13,11 +13,15 @@ from pydantic import BaseModel, Field
 from agroteca.config import settings
 from agroteca.generate import (
     build_meta_and_context,
+    corpus_topic_counts_async,
+    is_abstention,
     retrieve_ranked_async,
     retrieve_ranked_with_progress,
     stream_ndjson_async,
+    topics_for_async,
 )
 from agroteca.ingest import store
+from agroteca.suggest import classify, nearby_documents, rank_topics
 from agroteca.torch_runtime import TorchWorkerBusy
 from agroteca.warmup import load_and_warm
 
@@ -64,10 +68,31 @@ class Question(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
 
 
+class FeedbackSource(BaseModel):
+    """One retrieved chunk as the UI saw it — what the system surfaced when it failed."""
+    source: str = Field("", max_length=300)
+    score: float | None = None
+
+
 class Feedback(BaseModel):
     question: str = Field(..., max_length=2000)
     vote: Literal["up", "down"]
     answer_preview: str = Field("", max_length=5000)
+    # Everything below is optional so the existing {question, vote, answer_preview}
+    # payload keeps working unchanged. These capture the case the log never saw: an
+    # abstention, where the system said it could not answer. Those are the highest-signal
+    # failures and currently the least instrumented -- the vote buttons don't even render
+    # on that branch yet. `top_score` and `retrieved` are what let a later, larger
+    # re-run of eval/calibrate_abstention.py work from real traffic instead of the
+    # golden set's two no-answer questions.
+    abstained: bool = False
+    # Deliberately a free string, not a Literal: whether "near miss" vs "total miss" is
+    # even distinguishable is still an open question (see eval/calibrate_abstention.py).
+    # Logging an unproven taxonomy as a closed enum would bake in the answer.
+    kind: str | None = Field(None, max_length=32)
+    top_score: float | None = None
+    translated_query: str | None = Field(None, max_length=2000)
+    retrieved: list[FeedbackSource] = Field(default_factory=list)
 
 
 class RetrievedChunk(BaseModel):
@@ -106,9 +131,17 @@ async def stats(conn: AsyncConnection = Depends(get_conn)):
 
 @app.post("/feedback")
 def feedback(fb: Feedback):
-    """Append a thumbs-up/down to a JSONL log — the seed of a feedback loop."""
+    """Append a thumbs-up/down to a JSONL log — read back by eval/harvest_feedback.py.
+
+    Retrieval context is recorded alongside the vote so a failure can be triaged later
+    without re-running the query (which costs a full rerank, and on CPU that is minutes).
+    Lists are truncated on write rather than rejected on input: a payload slightly over
+    the expected size should still record the vote, not 422 away a real user's signal."""
     rec = {"ts": time.time(), "vote": fb.vote,
-           "question": fb.question, "answer_preview": fb.answer_preview[:200]}
+           "question": fb.question, "answer_preview": fb.answer_preview[:200],
+           "abstained": fb.abstained, "kind": fb.kind, "top_score": fb.top_score,
+           "translated_query": fb.translated_query,
+           "retrieved": [{"source": s.source, "score": s.score} for s in fb.retrieved[:8]]}
     with _FEEDBACK_LOCK, open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return {"ok": True}
@@ -191,7 +224,56 @@ async def ask_stream(payload: Question, request: Request):
         meta_line, context = build_meta_and_context(rows, meta, retrieval_ms, translated)
         yield meta_line
         yield json.dumps({"type": "progress", "stage": "generating"}) + "\n"
+
+        # Accumulate the reply as it streams so the server can tell whether the model
+        # abstained. Until now only the browser knew -- it string-matched the canonical
+        # phrase client-side -- which meant the single highest-signal outcome produced no
+        # server-side event at all: nothing logged, nothing offered to the reader.
+        spoken: list[str] = []
         async for line in stream_ndjson_async(payload.question, context):
+            try:
+                frame = json.loads(line)
+            except json.JSONDecodeError:
+                yield line
+                continue
+            if frame.get("type") == "token":
+                spoken.append(frame.get("text", ""))
+            elif frame.get("type") == "done" and is_abstention("".join(spoken)):
+                # Emitted BEFORE `done`, because the client finalises its view on `done`.
+                yield await _no_answer_frame(request, payload.question, rows, meta)
             yield line
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+async def _no_answer_frame(request: Request, question: str, rows, meta) -> str:
+    """Build the off-ramp frame for an abstention: what retrieval *did* surface.
+
+    Every field is derived from rows already retrieved or from real corpus metadata -- the
+    model is not asked to invent a rephrasing, because a plausible-sounding suggestion that
+    also fails costs the reader another multi-minute query and spends the one property this
+    system sells. Failing soft is deliberate: an off-ramp is a nicety, and no error here is
+    worth converting an honest 'I don't know' into a broken stream."""
+    servable = settings.tiers()
+    try:
+        async with request.app.state.pool.connection() as conn:
+            topics = await topics_for_async(conn, [r[0] for r in rows])
+            counts = await corpus_topic_counts_async(conn, servable)
+    except Exception:
+        topics, counts = {}, []
+
+    candidates = [(topics.get(cid), meta.get(cid, ("?", None))[0], score)
+                  for (cid, _sf, _text, score) in rows]
+    lang = "es" if (request.headers.get("accept-language", "es").lower().startswith("es")) else "en"
+    chips = rank_topics(candidates, lang=lang, servable_tiers=frozenset(servable),
+                        fallback_counts=counts)
+    return json.dumps({
+        "type": "no_answer",
+        "kind": classify(candidates),
+        "top_score": round(max((c[2] for c in candidates), default=0.0), 4),
+        "topics": [c.as_dict for c in chips],
+        "documents": nearby_documents(
+            [(sf, meta.get(cid, ("?", None))[0], score) for (cid, sf, _t, score) in rows],
+            servable_tiers=frozenset(servable),
+        ),
+    }, ensure_ascii=False) + "\n"
