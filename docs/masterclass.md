@@ -318,6 +318,12 @@ These matter *more* than the table above. Anyone can be taught `tsvector`; these
 
 Explaining the **whole system** as one coherent narrative — the kind that holds up under sustained, detailed questioning, not just a summary that sounds good once.
 
+Part 0 told this story once already, in plain language and without stopping. This is the same
+story told slowly, with the reasoning shown: not just *what* each piece does but why it's there,
+what it cost, and what I'd have to give up to remove it. Most sections close with a line phrased
+the way I'd actually say it out loud, because a design you can't explain aloud in one breath is
+usually one you haven't finished understanding.
+
 ### 4.1 — The one-sentence pitch
 > *"Agroteca is an eval-first, bilingual RAG system over agricultural documents: it answers agronomy questions strictly from a governed corpus, with citations, and abstains when it can't — and every component was measured against a golden set built before the system existed."*
 
@@ -335,6 +341,17 @@ Explaining the **whole system** as one coherent narrative — the kind that hold
 ```
 
 **Why it matters:** embedding 10,330 chunks is expensive and done *once*; a query must be fast.
+
+The split above is the single decision everything else hangs off. Reading the library is slow,
+so it happens once, in advance, with nobody waiting — that's the left-hand box, and it can afford
+to take seven hours. Answering is what somebody is sitting there waiting for, so the right-hand
+box is only allowed to do work that a person will tolerate in real time.
+
+Once you see the system that way, most of the design stops looking like a series of choices and
+starts looking like consequences. Why precompute the addresses? Because the left box can afford
+it and the right box can't. Why does the slow careful reader only see twenty candidates? Same
+reason. Nearly every "why is it built like that" question in the rest of Part 4 resolves back to
+which box the work landed in.
 
 ### 4.3 — The retrieval cascade, stage by stage
 
@@ -383,6 +400,24 @@ Two details that matter more than they look:
 
 ### 4.8 — The governance layer (the differentiator)
 
+**Plainly:** not every book in this library is allowed to leave the building, and the system knows
+which is which.
+
+Some of the best agronomy material is copyrighted. It's perfectly legal to read it, learn from
+it, and answer *my own* questions with it on *my own* machine — and quite another thing to stand
+up a public website that reproduces chunks of it to strangers. Most demo projects handle this by
+not thinking about it. Here, every document carries a tier that decides where it may appear, and
+the deployed corpus is a strict subset of the local one: roughly 30% of the library simply does
+not exist as far as a public visitor is concerned.
+
+That has an honest cost, and it's reported rather than hidden — the public deployment scores
+0.65 instead of 0.75, because two golden questions have their only source in the withheld tier.
+A worse version of this project would quote the higher number.
+
+The fourth tier is the odd one: a deliberately planted off-topic book (an organic chemistry
+textbook) that exists purely so the evaluation can check the retriever isn't fooled by something
+that merely *looks* academic. It is never served, never suggested, and never counted.
+
 Four tiers, each controlling *where a document may appear*: **open** (deployable), **local-only** (copyrighted, never shipped), **synthetic** (grounded original notes, cited as synthetic), **distractor** (eval-only hard-negatives). Two principles decide entry: the **idea/expression** line (facts are free, expression isn't) and **citation integrity** (never attribute synthesized text to a real source).
 
 > **One-breath answer to "how do you handle copyright/licensing?"** — *"Provenance is first-class — every document lives in exactly one tier, and the tier controls whether it can be served publicly. Copyrighted material runs only in local mode and is never in a public deployment."*
@@ -400,6 +435,16 @@ Four tiers, each controlling *where a document may appear*: **open** (deployable
 
 The real question underneath all of it: can you take a working model and *serve strangers*?
 
+**Why that's a different problem.** Code that works when you run it works under conditions you
+unconsciously arrange: one request at a time, a database you just started, your own patience when
+something is slow. Strangers arrive in parallel, at three in the morning, on a connection that
+drops halfway, having left the tab open since yesterday. Almost everything in this section exists
+because one of those situations actually happened and broke something.
+
+The pattern worth noticing: none of these were found by reading code or writing tests. Every one
+surfaced by standing the thing up and using it — and the two most embarrassing ones needed
+*somebody else* to use it, because I'd unknowingly trained myself around them.
+
 - **Config-driven models** — the LLM, host, timeouts, pool size, and inference device are settings, not source; a deploy swaps the unservable local CPU model for a hosted GPU one with an env var. The single change that makes it deployable at all.
 - **An async, health-checked connection pool** — `psycopg_pool.AsyncConnectionPool` (`min_size=5, max_size=20, timeout=30.0`), injected via FastAPI's `Depends()` so routes never touch the pool object; each connection validates on checkout, so an idle-dropped connection is replaced transparently rather than 500-ing a request. The stream path's dependency releases its connection *before* the minutes-long generation — enforced by FastAPI's own dependency-teardown ordering, not a manual `finally` — so an answer never holds the pool hostage.
 - **A dedicated retrieval-only route** — `/retrieve` shares one retrieval implementation with `/ask/stream` but skips generation entirely, so an eval harness or a monitoring probe can measure retrieval latency without paying for a multi-minute LLM call it doesn't need.
@@ -410,6 +455,15 @@ The real question underneath all of it: can you take a working model and *serve 
 > **One-breath:** *"The gap between a demo and a service is the failures that only appear under real traffic — a stale pooled connection, a timeout that can't tell slow from wedged, a cold-start on the first request, an event loop that silently can't run my async driver on Windows. I stood the server up, hit it, read the tracebacks, and fixed each one — then re-verified against the running process."*
 
 ### 4.11 — The eval as engineered software, not a script
+
+**Plainly:** if the scoreboard is what decides every argument, then a bug in the scoreboard is
+worse than a bug in the system — a broken system looks broken, but a broken ruler quietly makes
+you confident about the wrong thing. So the measuring code is tested like production code.
+
+The specific danger is that eval bugs don't crash. Flip a comparison so the *worst* result sorts
+first and nothing errors; every number just shifts slightly and you spend a week optimising in
+reverse. That's why the tests below pin the assumptions rather than the outputs — they exist to
+catch the silent inversions, not the loud failures.
 
 The eval is the project's thesis, so I hardened the *measurement code* to the same standard as the system:
 
@@ -664,14 +718,37 @@ Every answer is grounded in *this* project, phrased to say out loud in one or tw
 
 > Parts 1–5 explain *what* the system does; Part 6 explains *why the math works*. Master this and you can defend any component at a whiteboard. Notation is plain-text and reproducible: `A·B` is a dot product, `‖A‖` a vector norm, `Σ` a sum.
 
+**If formulas aren't your thing, you can still read this part.** Every section opens with the idea
+in plain words, and the formula that follows is a restatement of that idea in a more compact
+language — not a new claim you have to decode. Skip the notation, keep the paragraph, and you'll
+lose precision but not the plot. The equations are here because a system you can only describe
+in metaphors is one you can't debug.
+
 ### 6.1 — The embedding space: what a vector *is*
 
+**The idea first.** Imagine giving every paragraph in the library a street address, with one rule:
+paragraphs about similar things get addresses near each other. Do it well enough and "find me
+something about catching rainwater" stops being a text-matching problem and becomes "who lives
+near this address?" The move is to turn meaning into a place.
+
 An embedding model is a function `f: text → ℝ^d` (`d = 384` for MiniLM, `1024` for e5-large). It's trained so that **semantically similar texts land at nearby points** — meaning *becomes geometry*. Directions in the space encode features; distance encodes similarity.
+
+**How does it learn where to put things?** Nobody hand-places anything. The model is shown pairs
+that belong together (a question and the passage that answers it) and pairs that don't, and it
+gets nudged, millions of times, to pull the first kind closer and shove the second kind apart.
+The addresses aren't designed — they're the residue of that tug-of-war. That's the whole
+explanation for why paraphrases end up as neighbours, and it's called contrastive learning.
 
 - **How that space gets built — contrastive learning.** Training pulls *positive* pairs (a question and its true passage) together and pushes *negatives* apart, minimizing a loss like InfoNCE: `L = −log[ exp(sim(q,p⁺)/τ) / Σ exp(sim(q,pᵢ)/τ) ]`. That objective is *why* paraphrases cluster and why a bi-encoder can retrieve by meaning.
 - **Dimensionality is a real knob.** More dims = more representational capacity, but more storage (`d × 4 bytes/vector`) and slower distance math. 384 vs 1024 isn't free — I *measured* the tradeoff (§4.13): e5's 1024-dim doubled dense recall but cost 8× query latency.
 
 ### 6.2 — Cosine similarity, derived
+
+**The idea first.** Once meaning is a place, "how similar are these two things?" becomes "do they
+point the same way from where I'm standing?" Note *direction*, not distance travelled. A one-line
+note and a three-page essay making the same point should count as similar, and they will, because
+we measure the angle between them and ignore how far each one goes. That choice — angle, not
+length — is the whole reason a short chunk can beat a long one on the same subject.
 
 The similarity metric behind dense retrieval:
 
@@ -687,12 +764,40 @@ cos(θ) = (A · B) / (‖A‖ · ‖B‖)
 
 ### 6.3 — Inside the embedder: tokens, attention, pooling, and the truncation ceiling
 
+**The idea first.** Four things happen to a paragraph on its way to becoming an address, and each
+one leaves a fingerprint on what the system can and can't do. The text is chopped into pieces; the
+pieces are allowed to look at each other so each takes colour from its neighbours; everything past
+a certain length is thrown away; and what survives is averaged into a single point.
+
+That third step is the one that bit me, and it's worth sitting with: the model doesn't *skim* the
+rest of a long passage, it never receives it. Which is why two texts sharing an opening can end up
+at precisely the same address no matter how wildly they diverge afterwards — the model is
+answering a question about a paragraph it was only ever shown the beginning of.
+
 1. **Tokenization** — text → subword tokens (WordPiece/BPE). A code like `WL-323` may fragment awkwardly, which is *why dense retrieval fumbles exact tokens* and lexical is needed.
 2. **Self-attention** — the transformer core: `Attention(Q,K,V) = softmax(QKᵀ/√d_k)·V`. Every token's representation becomes a weighted blend of *all* tokens → context-awareness. It's `O(n²)` in sequence length `n`, which is **why a `max_seq_length` exists at all**.
 3. **The truncation ceiling (the war-story math).** MiniLM's `max_seq_length = 128`. Tokens past position 128 are **dropped before the forward pass** — the model literally never computes on them. That's why two chunks sharing their first 128 tokens embed *identically* (cosine 1.0) regardless of their tails, and why ~half my answers were invisible to the dense vector (§ war story #7).
 4. **Pooling** — the transformer emits one vector *per token*; you need one *per chunk*. **Mean pooling** averages them (MiniLM's current default — the exact `UserWarning` we saw); **CLS pooling** takes the special `[CLS]` token's vector. Mean pooling is why the whole (visible) sequence contributes.
 
 ### 6.4 — Bi-encoder vs cross-encoder: the complexity argument that *forces* the cascade
+
+**The idea first, because this is the most important trade in the system.** There are two ways to
+judge whether a paragraph answers a question.
+
+The cheap way: describe the question in isolation, describe the paragraph in isolation, then check
+whether the two descriptions look alike. Crucially, the paragraph's description can be written
+*long before* anyone asks anything — so you do that work once, for all 10,330 of them, and at
+query time you're only comparing summaries.
+
+The expensive way: put the question and the paragraph side by side and read them *together*,
+letting every word of one weigh against every word of the other. Far better judgement — and
+impossible to prepare in advance, because the reading depends on the question. Ask a new question
+and all the work must be redone, for every paragraph.
+
+So the first method can be precomputed and the second cannot, and that single asymmetry dictates
+the entire architecture. Not a preference, not a tuning choice: the cheap method must go first
+because it's the only one that scales, and the expensive one can only ever see what the cheap one
+hands it. Everything else in the retrieval design follows from that.
 
 | | Bi-encoder (retrieval) | Cross-encoder (rerank) |
 |---|---|---|
@@ -705,6 +810,17 @@ The reranker reads the query and the chunk *together*, so every query token can 
 
 ### 6.5 — Approximate nearest neighbor & HNSW
 
+**The idea first.** Finding the nearest address by checking every address works fine for a
+village and collapses for a city. The trick is to stop being exhaustive and start being
+*navigational* — the way you'd actually find a street: fly to the right city, drive to the right
+district, then walk the last block. Long hops first, short steps last.
+
+That's precisely what the index does, and it accepts a bargain most people find surprising:
+it will occasionally miss the true nearest neighbour. In exchange, search time grows like the
+*logarithm* of the collection rather than in step with it — ten times the documents costs barely
+more than a couple of extra hops. For search, a rare near-miss is a fine price. For a bank
+ledger it would be unthinkable, which is why this trick belongs here and not there.
+
 - **Exact NN** compares the query to all `N` vectors → `O(N·d)` per query. Fine at 10k, fatal at millions.
 - **HNSW (Hierarchical Navigable Small World)** trades a little recall for huge speed:
   - A **multi-layer graph**. Top layers: few nodes, long-range links. Bottom layer: every node, short links. (Think a skip-list in graph form.)
@@ -714,12 +830,35 @@ The reranker reads the query and the chunk *together*, so every query token can 
 
 ### 6.6 — Lexical retrieval: tf-idf → BM25 → Postgres FTS
 
+**The idea first.** Old-fashioned keyword search has one genuinely clever insight underneath it:
+not all matching words are worth the same. A document containing "the" tells you nothing, because
+everything contains "the". A document containing `WL-323` tells you a great deal, precisely
+because almost nothing does. So weight each word by how *rare* it is across the whole library —
+common words count for almost nothing, rare ones count for a lot.
+
+Two refinements make it work in practice. The tenth mention of a word shouldn't count ten times
+as much as the first (there are diminishing returns on repetition), and a long document shouldn't
+win just by containing more words. Add those and you have essentially every keyword search engine
+of the last thirty years.
+
+This is also where my most embarrassing bug lived — see the AND/OR note at the end of this
+section, which quietly scored the entire lexical retriever at zero.
+
 - **tf-idf**: term weight = `tf × idf`, where `idf = log(N/df)` — reward terms frequent *in the doc* but rare *in the corpus*.
 - **BM25**: tf-idf plus **term-frequency saturation** (`tf/(tf+k₁)` — diminishing returns) and **length normalization**. The modern lexical default.
 - **Postgres FTS (what I actually use)**: `tsvector` (doc → sorted lexemes) matched against a `tsquery` via `@@`, ranked by **`ts_rank_cd`** (cover density — rewards query terms appearing *close together*). I use the **`'simple'` config**: no stemming, no stopwords → language-agnostic exact-token matching, correct for a mixed ES+EN corpus with codes like `WL-323`.
 - **The AND/OR subtlety (war story #1):** `websearch_to_tsquery` **ANDs** terms, so a full-sentence question required *every* word in one chunk → matched nothing (lexical = 0.00). Fix: build an **OR of the content terms**.
 
 ### 6.7 — Rank fusion: Reciprocal Rank Fusion (RRF) derived
+
+**The idea first.** Two judges have each ranked the same candidates, but they score on
+incompatible systems — one marks out of ten, the other awards unbounded points. You can't average
+those. The elegant escape is to discard the scores entirely and keep only the *running order*.
+First place is first place regardless of what scale produced it.
+
+Then reward agreement: something both judges placed respectably beats something one judge adored
+and the other ignored. That's the entire mechanism, and it needs no calibration, no training data,
+and no assumption that either judge's numbers mean anything in particular.
 
 **The problem:** dense scores are cosine `∈ [0,1]`; lexical scores are `ts_rank_cd ∈ [0,∞)`. **Different scales — you can't just add them.**
 
@@ -735,6 +874,17 @@ RRF_score(d) = Σ_r  1 / (k + rank_r(d))        # summed over each ranker r
 - **The honest nuance I measured:** equal-weight RRF *diluted* the stronger lexical recall (`doc@5` 0.85 → 0.65) — a real fusion artifact, and exactly why I didn't stop at hybrid; the reranker is what decisively won.
 
 ### 6.8 — Evaluation metrics, formally
+
+**The idea first.** Every score in this project comes from a single fact: *where in the results
+did the right answer land?* First? Fourth? Nowhere at all? Answer that and every metric falls out
+of it by arithmetic.
+
+Which one you choose determines what you're able to notice. "Was it somewhere in the top five?"
+is forgiving — it treats first place and fifth identically, so a component whose entire job is
+*reordering* can work perfectly and move that number not at all. Ask instead "how high did it
+land?" and the same component's contribution becomes obvious. This isn't hypothetical: it's
+exactly what happened here, and the forgiving metric nearly buried the single best thing in the
+pipeline.
 
 Let `rank` = the 1-based position of the answer chunk in the results (`∞` if absent). Everything derives from this one primitive (the `_scoring.answer_rank` design).
 
