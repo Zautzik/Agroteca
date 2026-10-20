@@ -14,11 +14,15 @@ from agroteca.config import settings
 # resets idle localhost connections (the 10053 abort). Keepalives help but the proxy can
 # still drop; make_pool()'s check= is the real safety net (validates a conn on checkout).
 KEEPALIVE = {"keepalives": 1, "keepalives_idle": 10, "keepalives_interval": 5, "keepalives_count": 5}
+# Connection options shared by every connect path. prepare_threshold=None turns off server-side
+# prepared statements, which a transaction-mode pooler (PgBouncer, e.g. Neon's pooled endpoint)
+# cannot keep track of across connections; the local default keeps psycopg's normal behaviour.
+CONN_KWARGS = {**KEEPALIVE, "prepare_threshold": settings.prepare_threshold}
 
 
 def connect() -> psycopg.Connection:
     """One-shot connection for CLI / ingest / eval scripts. The served API uses make_pool()."""
-    conn = psycopg.connect(settings.db_url, **KEEPALIVE)
+    conn = psycopg.connect(settings.db_url, **CONN_KWARGS)
     register_vector(conn)
     return conn
 
@@ -26,7 +30,7 @@ def connect() -> psycopg.Connection:
 async def connect_async() -> psycopg.AsyncConnection:
     """Async twin of connect() for eval/CLI scripts that need the async production retrieval
     path (retrieve_ranked_async and friends). The served API uses make_async_pool() instead."""
-    conn = await psycopg.AsyncConnection.connect(settings.db_url, **KEEPALIVE)
+    conn = await psycopg.AsyncConnection.connect(settings.db_url, **CONN_KWARGS)
     await register_vector_async(conn)
     return conn
 
@@ -40,7 +44,7 @@ def make_pool(min_size: int = 1, max_size: int | None = None) -> ConnectionPool:
         settings.db_url,
         min_size=min_size,
         max_size=max_size or settings.db_pool_max,
-        kwargs=KEEPALIVE,
+        kwargs=CONN_KWARGS,
         configure=register_vector,
         check=ConnectionPool.check_connection,   # SELECT 1 on checkout; discard + replace dead conns
         open=False,
@@ -58,7 +62,7 @@ def make_async_pool(min_size: int = 5, max_size: int = 20, timeout: float = 30.0
         min_size=min_size,
         max_size=max_size,
         timeout=timeout,
-        kwargs=KEEPALIVE,
+        kwargs=CONN_KWARGS,
         configure=register_vector_async,
         check=AsyncConnectionPool.check_connection,
         open=False,

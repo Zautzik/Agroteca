@@ -7,15 +7,12 @@ module owns ONLY the translation; the retrieval stays LLM-free (rerank_scored_bi
 translated string as an argument). It **fails soft**: any error returns None, and the caller falls
 back to original-only retrieval — so translation is a bonus that can never make retrieval worse.
 """
-import httpx
-from ollama import Client
-
 from agroteca.config import settings
+from agroteca.llm import make_llm
 
-# Own client (retrieval must not import from generate.py -> would be circular). Short connect
-# timeout so an unreachable LLM fails fast into the original-only fallback.
-_client = Client(host=settings.gen_base_url,
-                 timeout=httpx.Timeout(settings.translate_timeout, connect=10.0))
+# Own backend instance (retrieval must not import from generate.py -> would be circular), built
+# lazily with the shorter translate timeout so an unreachable LLM fails fast into the fallback.
+_llm = None
 
 _PROMPT = (
     "Translate this agricultural question to the other language: if it is in Spanish, give the "
@@ -29,13 +26,11 @@ def translate_query(question: str) -> str | None:
 
     Language detection is left to the (multilingual) model rather than a brittle heuristic. On any
     failure this returns None on purpose — the caller treats translation as optional."""
+    global _llm
     try:
-        resp = _client.chat(
-            model=settings.gen_model,
-            messages=[{"role": "user", "content": _PROMPT.format(q=question)}],
-            options={"num_predict": 128},
-        )
-        out = resp["message"]["content"].strip().strip('"').strip()
+        if _llm is None:
+            _llm = make_llm(settings.translate_timeout)
+        out = _llm.chat(None, _PROMPT.format(q=question), 128).strip().strip('"').strip()
         # Guard the degenerate cases: empty, or the model echoed the question unchanged.
         return out if out and out.lower() != question.strip().lower() else None
     except Exception:

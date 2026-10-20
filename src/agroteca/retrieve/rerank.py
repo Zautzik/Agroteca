@@ -8,8 +8,7 @@ the true answer to the front. It's slow, so we only run it on the hybrid pool
 """
 from functools import lru_cache
 
-import torch
-from transformers import AutoModelForSequenceClassification
+import httpx
 
 from agroteca.config import settings
 from agroteca.retrieve.hybrid import hybrid_search, hybrid_search_async
@@ -21,6 +20,8 @@ class _CrossEncoder:
     keep the same `.rerank(query, texts) -> scores` contract the old fastembed backend had."""
 
     def __init__(self, model_name: str, device: str, revision: str):
+        # Imported here, not at module top: the hosted profile ships without torch/transformers.
+        from transformers import AutoModelForSequenceClassification
         # trust_remote_code=True: jina-reranker-v2 ships a custom architecture + scoring method
         # (not a stock AutoModelForSequenceClassification) -- this runs code from the HF repo.
         # `revision` pins that code to a reviewed commit (settings.rerank_model_revision) so a
@@ -32,15 +33,51 @@ class _CrossEncoder:
     def rerank(self, query: str, texts: list[str]) -> list[float]:
         if not texts:
             return []
+        import torch
         pairs = [[query, t] for t in texts]
         with torch.inference_mode():
             scores = self._model.compute_score(pairs, max_length=1024)
         return scores if isinstance(scores, list) else [scores]
 
 
+class _JinaAPIReranker:
+    """The same jina-reranker-v2-base-multilingual, served by Jina's rerank API (hosted profile).
+
+    Keeps the `.rerank(query, texts) -> scores` contract: one score per input text, in INPUT
+    order. The API returns results sorted by relevance with each result's original `index`, so
+    the scores are scattered back into input order here -- the callers sort on their own."""
+
+    def __init__(self, url: str, model: str, api_key: str, timeout: float,
+                 transport: httpx.BaseTransport | None = None):
+        if not api_key:
+            raise RuntimeError("AGROTECA_JINA_API_KEY is not set (required by profile=hosted)")
+        self._model = model
+        self._client = httpx.Client(timeout=timeout, transport=transport,
+                                    headers={"Authorization": f"Bearer {api_key}"})
+        self._url = url
+
+    def rerank(self, query: str, texts: list[str]) -> list[float]:
+        if not texts:
+            return []
+        resp = self._client.post(self._url, json={
+            "model": self._model, "query": query, "documents": texts,
+            "top_n": len(texts), "return_documents": False,
+        })
+        resp.raise_for_status()
+        scores = [float("-inf")] * len(texts)
+        for item in resp.json()["results"]:
+            scores[item["index"]] = float(item["relevance_score"])
+        if any(s == float("-inf") for s in scores):
+            raise RuntimeError("Jina rerank response did not score every document")
+        return scores
+
+
 @lru_cache(maxsize=1)
-def _reranker() -> _CrossEncoder:
+def _reranker():
     # Lazy + cached: the ~1.1 GB model downloads on first use, not on import.
+    if settings.hosted:
+        return _JinaAPIReranker(settings.jina_rerank_url, settings.jina_rerank_model,
+                                settings.jina_api_key, settings.jina_timeout)
     return _CrossEncoder(settings.rerank_model, settings.resolved_device, settings.rerank_model_revision)
 
 

@@ -45,6 +45,50 @@ class Settings(BaseSettings):
     rerank_model_revision: str = "9cfeff2df7d40d1b78e75e5e9cebec92a99813c9"
     rerank_candidates: int = 20   # how many hybrid results to re-score
 
+    # --- deployment profile ---
+    # "local": the measured reference stack -- sentence-transformers + the torch cross-encoder on
+    # `device`, generation through Ollama. "hosted": the $0 public demo -- the SAME MiniLM model run
+    # through ONNX Runtime (no torch in the bundle), the SAME jina-reranker-v2 served by Jina's API,
+    # and generation through an OpenAI-compatible endpoint (Groq). Same models on purpose: the
+    # numbers in eval/results.csv stay comparable, and a hosted eval row is measured, not assumed.
+    profile: str = "local"        # "local" | "hosted"
+
+    # hosted: query embedding (ONNX). The model file is fetched once per cold instance from the
+    # embed model's own Hugging Face repo, pinned to a revision, into a writable cache dir.
+    onnx_model_file: str = "onnx/model.onnx"   # path inside the HF repo; a smaller variant is a
+                                               # deliberate swap only after eval/parity_check.py passes
+    onnx_model_revision: str = "main"          # pin to a commit sha for a reproducible deploy
+    onnx_cache_dir: Path = Path("/tmp/agroteca-onnx")
+    embed_max_tokens: int = 128                # MiniLM's max_seq_length -- must match the index
+
+    # hosted: rerank via Jina's API (same model as `rerank_model`).
+    jina_api_key: str = ""
+    jina_rerank_url: str = "https://api.jina.ai/v1/rerank"
+    jina_rerank_model: str = "jina-reranker-v2-base-multilingual"
+    jina_timeout: float = 30.0
+
+    # hosted: generation via an OpenAI-compatible chat-completions API (Groq by default).
+    gen_api_key: str = ""
+    openai_base_url: str = "https://api.groq.com/openai/v1"
+    openai_model: str = "llama-3.3-70b-versatile"
+
+    # hosted: serverless-friendly DB pool, and protection for the free-tier quotas.
+    db_pool_min: int = 5
+    db_prepare_threshold: int = 5          # psycopg's default; hosted turns it off (see below)
+    daily_request_cap: int = 0             # 0 = no cap (local). Hosted: questions per UTC day, all users
+    per_ip_hourly_cap: int = 0             # 0 = no cap (local). Hosted: questions per IP per hour
+    ip_hash_salt: str = ""                 # hosted: secret salt so stored IP hashes can't be reversed
+
+    @property
+    def hosted(self) -> bool:
+        return self.profile == "hosted"
+
+    @property
+    def prepare_threshold(self) -> int | None:
+        """None disables server-side prepared statements, which a transaction-mode pooler
+        (PgBouncer, e.g. Neon's pooled endpoint used by the hosted profile) can't track."""
+        return None if self.hosted else self.db_prepare_threshold
+
     # --- inference device (embedder + reranker; the generation LLM runs in Ollama, separately) ---
     # "cuda" by default: this is a GPU-serving deployment, and warmup.load_and_warm() refuses to
     # silently fall back to CPU if AGROTECA_DEVICE=cuda but no GPU is visible (fail loud, not slow).

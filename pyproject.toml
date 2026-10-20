@@ -4,15 +4,27 @@ version = "0.1.0"
 description = "Eval-first bilingual agricultural RAG"
 readme = "README.md"
 requires-python = ">=3.12"
+# Base dependencies = what the hosted profile (the public demo) needs at runtime, and nothing
+# heavier: the serverless bundle has a hard size limit. The reference stack -- torch embedder and
+# cross-encoder, Ollama, PDF ingestion -- is the `local` extra: `uv sync --extra local`.
 dependencies = [
-    "einops>=0.8.0",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
-    "ollama>=0.6.2",
+    "huggingface-hub>=0.24",
+    "numpy>=1.26",
+    "onnxruntime>=1.18",
     "pgvector>=0.5.0",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
+    "tokenizers>=0.19",
+    "uvicorn>=0.52.1",
+]
+
+[project.optional-dependencies]
+local = [
+    "einops>=0.8.0",
+    "ollama>=0.6.2",
     "pymupdf>=1.28.0",
     "sentence-transformers>=3.0.0",
     "torch>=2.3.0",
@@ -21,7 +33,6 @@ dependencies = [
     # 5.x rewrite (confirmed by hitting the ImportError against 5.16.1). Bump only after
     # re-verifying that remote code still loads.
     "transformers>=4.44.0,<5",
-    "uvicorn>=0.52.1",
 ]
 
 [build-system]
@@ -39,3 +50,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["eval"]   # so tests can `import _scoring` (agroteca is already installed)
 testpaths = ["tests"]
+
+[tool.vercel]
+# Hosted profile entrypoint (see app.py and DEPLOY.md).
+entrypoint = "app:app"
