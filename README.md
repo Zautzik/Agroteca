@@ -1,5 +1,7 @@
 # Agroteca
 
+[![CI](https://github.com/Zautzik/Agroteca/actions/workflows/ci.yml/badge.svg)](https://github.com/Zautzik/Agroteca/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 An eval-first Retrieval-Augmented Generation (RAG) pipeline achieving 0.75 retrieval@5 accuracy via hybrid search and cross-encoder reranking.
 
 Retrieval@5 (defined precisely in [Benchmark Results](#benchmark-results-measured) below) is scored against a 22-question golden set written *before* the retriever existed, over a bilingual (ES/EN) agricultural document corpus. Every stage of the cascade — dense, hybrid, reranked — is a measured line in [`eval/results.csv`](eval/results.csv), not an internal estimate. The same discipline extends to serving: an async connection pool sized and load-bearing under FastAPI's dependency injection, and explicit model warmup that pays CUDA/VRAM initialization once at process start instead of on a user's first request.
@@ -194,4 +196,4 @@ results/, eval/results.csv   # measured results backing every claim above
 
 ## Licensing & Provenance
 
-Source documents retain their original licenses. Only open-license, government, or public-domain material is served by any public deployment; copyrighted material is confined to the local-only tier and is never redistributed. See [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).
+Code is MIT-licensed (see [`LICENSE`](LICENSE)). Source documents retain their original licenses. Only open-license, government, or public-domain material is served by any public deployment; copyrighted material is confined to the local-only tier and is never redistributed. See [`DATA_GOVERNANCE.md`](DATA_GOVERNANCE.md).
