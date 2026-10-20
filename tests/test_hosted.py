@@ -198,6 +198,15 @@ def test_admit_enforces_both_caps(monkeypatch, daily, ip, expected):
     assert asyncio.run(quota.admit(_FakeConn(daily, ip), "1.2.3.4")) == expected
 
 
+def test_ip_rejection_does_not_consume_the_daily_cap(monkeypatch):
+    monkeypatch.setattr(quota.settings, "daily_request_cap", 100)
+    monkeypatch.setattr(quota.settings, "per_ip_hourly_cap", 5)
+    monkeypatch.setattr(quota.settings, "ip_hash_salt", "s")
+    conn = _FakeConn(daily=1, ip=6)
+    assert asyncio.run(quota.admit(conn, "1.2.3.4")) == "ip_cap"
+    assert conn.calls == ["usage_ip_hourly"]          # daily counter never touched
+
+
 def test_admit_is_a_no_op_when_caps_are_zero(monkeypatch):
     monkeypatch.setattr(quota.settings, "daily_request_cap", 0)
     monkeypatch.setattr(quota.settings, "per_ip_hourly_cap", 0)
@@ -311,7 +320,7 @@ def test_hosted_feedback_writes_the_abstention_context(monkeypatch):
     sql, params = executed[0]
     assert "INSERT INTO feedback" in sql and "retrieved" in sql
     assert params[3] is True and params[4] == "near_miss"
-    assert len(json.loads(params[7])) == 8          # truncated to 8, like the local log
+    assert len(params[7].obj) == 8                  # truncated to 8, like the local log
 
 
 def test_quota_rejection_is_a_429_with_a_readable_detail(monkeypatch):

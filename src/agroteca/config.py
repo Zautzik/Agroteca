@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     daily_request_cap: int = 0             # 0 = no cap (local). Hosted: questions per UTC day, all users
     per_ip_hourly_cap: int = 0             # 0 = no cap (local). Hosted: questions per IP per hour
     ip_hash_salt: str = ""                 # hosted: secret salt so stored IP hashes can't be reversed
+    cache_enabled: bool | None = None      # None = on when hosted (saves Jina/Groq quota), off locally
 
     @property
     def hosted(self) -> bool:
