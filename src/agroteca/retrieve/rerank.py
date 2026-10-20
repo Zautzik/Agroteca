@@ -10,6 +10,7 @@ from functools import lru_cache
 
 import httpx
 
+from agroteca import cache
 from agroteca.config import settings
 from agroteca.retrieve.hybrid import hybrid_search, hybrid_search_async
 from agroteca.torch_runtime import run_torch
@@ -148,6 +149,17 @@ def rerank_scored_bilingual(conn, query: str, translated: str, k: int = 5,
     return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]
 
 
+async def _rerank_cached(conn, query: str, texts: list[str]) -> list[float]:
+    """One rerank call, through the persistent cache when it is enabled (hosted: each call spends
+    the one-time Jina allowance). Keyed on the model and the exact query + candidate texts, so a
+    hit is the same scores the same call produced before. A cached list of the wrong length is
+    ignored rather than trusted."""
+    key = cache.make_key("rerank", settings.jina_rerank_model if settings.hosted
+                         else settings.rerank_model, query, texts)
+    return await cache.cached(conn, key, lambda: run_torch(_reranker().rerank, query, texts),
+                              valid=lambda v: isinstance(v, list) and len(v) == len(texts))
+
+
 async def rerank_scored_async(conn, query: str, k: int = 5,
                               candidates: int | None = None, tiers: list[str] | None = None):
     """Async twin of rerank_scored for the FastAPI serving path. The cross-encoder call is
@@ -158,7 +170,7 @@ async def rerank_scored_async(conn, query: str, k: int = 5,
     if not pool:
         return []
     texts = [row[2] for row in pool]
-    scores = await run_torch(_reranker().rerank, query, texts)
+    scores = await _rerank_cached(conn, query, texts)
     ranked = sorted(zip(pool, scores), key=lambda p: p[1], reverse=True)
     return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]
 
@@ -184,6 +196,12 @@ async def rerank_scored_bilingual_async(conn, query: str, translated: str, k: in
                     best[i] = s
         return best
 
-    best = await run_torch(_score_both)
+    if cache.enabled():
+        # Two separately cached calls (one per query) instead of one combined torch job, so a
+        # repeat of either query reuses its scores. Same max-over-both result as _score_both.
+        best = [max(a, b) for a, b in zip(await _rerank_cached(conn, query, texts),
+                                          await _rerank_cached(conn, translated, texts))]
+    else:
+        best = await run_torch(_score_both)
     ranked = sorted(zip(pool, best), key=lambda p: p[1], reverse=True)
     return [(cid, sf, text, float(score)) for (cid, sf, text), score in ranked[:k]]

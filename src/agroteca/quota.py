@@ -36,13 +36,17 @@ def client_ip(headers, fallback: str | None) -> str:
 
 
 async def admit(conn, ip: str) -> str | None:
-    """Count this question; return None if it may proceed, else a short reason it may not."""
-    if settings.daily_request_cap > 0:
-        cur = await conn.execute(_DAILY_SQL)
-        if (await cur.fetchone())[0] > settings.daily_request_cap:
-            return "daily_cap"
+    """Count this question; return None if it may proceed, else a short reason it may not.
+
+    The per-IP check runs first, and a question it rejects is never counted against the global
+    daily cap -- otherwise one client hammering the endpoint would use up the whole day's quota
+    and lock every other visitor out."""
     if settings.per_ip_hourly_cap > 0:
         cur = await conn.execute(_IP_SQL, (hash_ip(ip, settings.ip_hash_salt),))
         if (await cur.fetchone())[0] > settings.per_ip_hourly_cap:
             return "ip_cap"
+    if settings.daily_request_cap > 0:
+        cur = await conn.execute(_DAILY_SQL)
+        if (await cur.fetchone())[0] > settings.daily_request_cap:
+            return "daily_cap"
     return None

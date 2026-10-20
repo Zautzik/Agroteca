@@ -222,8 +222,12 @@ stops the service rather than billing it:
 | Jina | **10M tokens per key, once**, non-commercial | rerank calls fail; the demo stops answering |
 
 The Jina allowance is the binding one: a bilingual question reranks up to ~40 chunks twice,
-roughly 40-50k tokens, so 10M tokens is on the order of 200 questions. The daily and per-IP caps
-exist to make that last; `AGROTECA_RERANK_CANDIDATES` trades recall for tokens if needed.
+roughly 40-50k tokens, so 10M tokens is on the order of 200 *distinct* questions. Three things
+make that last: rerank scores and translations are cached in Postgres (`kv_cache`, migration
+004 -- a repeated question costs no Jina tokens and no translation call; `SELECT sum(hits) FROM
+kv_cache` shows what it saved); the daily and per-IP caps (a request rejected by the per-IP cap
+is never counted against the daily one, so one client can't lock everyone out); and
+`AGROTECA_RERANK_CANDIDATES`, which trades recall for tokens if needed.
 
 **Cold starts.** A new serverless instance downloads the ONNX model on its first request and Neon
 wakes from zero, so the first question after an idle period is slow; later ones are not.

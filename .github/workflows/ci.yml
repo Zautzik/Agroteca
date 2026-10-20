@@ -41,4 +41,4 @@ jobs:
       - name: Confirm torch is absent
         run: uv run --locked python -c "import importlib.util as u, sys; sys.exit(u.find_spec('torch') is not None)"
       - name: Hosted tests
-        run: uv run --locked pytest -q tests/test_hosted.py
+        run: uv run --locked pytest -q tests/test_hosted.py tests/test_cache.py

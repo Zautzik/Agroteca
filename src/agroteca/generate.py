@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 
+from agroteca import cache
 from agroteca.config import settings
 from agroteca.ingest import store
 from agroteca.llm import make_llm
@@ -142,6 +143,17 @@ def prepare_ndjson(conn, question: str, k: int = 5) -> tuple[str, str]:
     return meta_line, context
 
 
+async def _translate_cached(conn, question: str) -> str | None:
+    """translate_query (a blocking LLM call, so it runs in a worker thread), through the
+    persistent cache when enabled. A stable translation keeps the bilingual candidate pool
+    identical across repeats, which is what lets the rerank cache hit. A failed translation
+    (None) is not cached, so it is retried next time."""
+    key = cache.make_key("translate", settings.openai_model if settings.hosted
+                         else settings.gen_model, question)
+    return await cache.cached(conn, key, lambda: asyncio.to_thread(translate_query, question),
+                              valid=lambda v: isinstance(v, str) and bool(v))
+
+
 async def _meta_for_async(conn, chunk_ids):
     """Async twin of _meta_for for the FastAPI serving path."""
     if not chunk_ids:
@@ -202,7 +214,7 @@ async def retrieve_ranked_async(conn, question: str, k: int = 5, tiers: list[str
       meta -> {chunk_id: (tier, page)}
     """
     t0 = time.perf_counter()
-    translated = await asyncio.to_thread(translate_query, question) if settings.translate_queries else None
+    translated = await _translate_cached(conn, question) if settings.translate_queries else None
     if translated:
         rows = await rerank_scored_bilingual_async(conn, question, translated, k=k, tiers=tiers)
     else:
@@ -254,7 +266,7 @@ async def retrieve_ranked_with_progress(conn, question: str, k: int = 5, tiers: 
     translated = None
     if settings.translate_queries:
         yield ("progress", "translating")
-        translated = await asyncio.to_thread(translate_query, question)
+        translated = await _translate_cached(conn, question)
 
     yield ("progress", "reranking")
     if translated:

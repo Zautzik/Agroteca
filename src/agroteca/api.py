@@ -9,6 +9,7 @@ from typing import AsyncIterator, Literal
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from psycopg import AsyncConnection
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from agroteca.config import settings
@@ -165,7 +166,7 @@ async def feedback(fb: Feedback, request: Request):
                 "INSERT INTO feedback (vote, question, answer_preview, abstained, kind, "
                 "top_score, translated_query, retrieved) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                 (fb.vote, fb.question, fb.answer_preview[:200], fb.abstained, fb.kind,
-                 fb.top_score, fb.translated_query, json.dumps(retrieved, ensure_ascii=False)),
+                 fb.top_score, fb.translated_query, Jsonb(retrieved)),
             )
         return {"ok": True}
     rec = {"ts": time.time(), "vote": fb.vote,
