@@ -13,10 +13,8 @@ legitimate job: a fail-fast preflight check (does this container actually have a
 device?) that aborts the container before it even tries to bind a port, rather than starting a
 "GPU microservice" that silently serves on the CPU (see `require_cuda`).
 """
-import torch
-
 from agroteca.config import settings
-from agroteca.ingest.embed import embed_passages
+from agroteca.ingest.embed import embed_passages, embed_query
 from agroteca.retrieve.rerank import warm as warm_reranker
 
 WARMUP_BATCH = [f"warmup sequence {i}" for i in range(1, settings.warmup_batch_size + 1)]
@@ -26,6 +24,7 @@ def require_cuda() -> None:
     """Fail loud, not slow: a GPU microservice that silently serves on CPU when the container
     lost its GPU (bad --gpus flag, missing nvidia-container-toolkit, wrong base image) is a much
     worse failure mode than refusing to start."""
+    import torch
     if settings.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError(
             "AGROTECA_DEVICE=cuda but no CUDA device is visible to this process -- check "
@@ -38,6 +37,12 @@ def load_and_warm() -> None:
     """Load both models onto `settings.resolved_device` and force one real forward pass through
     each -- this is what actually pays the CUDA-context/cuDNN-autotune/VRAM-allocation cost.
     Must run in the SAME process that will serve requests (see module docstring)."""
+    if settings.hosted:
+        # No GPU and no torch here: load the ONNX embedder once (downloads the model on a cold
+        # instance) so the first real question doesn't pay for it. The reranker is a remote API.
+        embed_query("warmup")
+        return
+    import torch
     require_cuda()
     embed_passages(WARMUP_BATCH)   # dense embedder: init CUDA context, allocate its VRAM
     warm_reranker()                # cross-encoder: same, for the rerank model

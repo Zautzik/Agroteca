@@ -1,3 +1,4 @@
+import asyncio
 import json
 import threading
 import time
@@ -21,6 +22,7 @@ from agroteca.generate import (
     topics_for_async,
 )
 from agroteca.ingest import store
+from agroteca.quota import admit, client_ip
 from agroteca.suggest import classify, nearby_documents, rank_topics
 from agroteca.torch_runtime import TorchWorkerBusy
 from agroteca.warmup import load_and_warm
@@ -38,7 +40,7 @@ async def lifespan(app: FastAPI):
     # handshake + auth per question. min_size=5/max_size=20/timeout=30.0 give headroom against
     # request starvation under concurrent load; construct+open here (not at import time) since
     # an async pool must open from a running event loop.
-    pool = store.make_async_pool(min_size=5, max_size=20, timeout=30.0)
+    pool = store.make_async_pool(min_size=settings.db_pool_min, max_size=20, timeout=30.0)
     await pool.open(wait=True, timeout=30.0)
     app.state.pool = pool
     yield
@@ -129,21 +131,53 @@ async def stats(conn: AsyncConnection = Depends(get_conn)):
     return {"chunks": chunks, "documents": docs, "tiers": tiers}
 
 
+_QUOTA_MESSAGES = {
+    "daily_cap": "The public demo has reached today's question limit. Please try again tomorrow.",
+    "ip_cap": "Too many questions from this connection in the last hour. Please try again later.",
+}
+
+
+async def _quota_rejection(request: Request) -> JSONResponse | None:
+    """Count this question against the demo quotas (no-op when both caps are 0)."""
+    if settings.daily_request_cap <= 0 and settings.per_ip_hourly_cap <= 0:
+        return None
+    ip = client_ip(request.headers, request.client.host if request.client else None)
+    async with request.app.state.pool.connection() as conn:
+        reason = await admit(conn, ip)
+    if reason:
+        return JSONResponse({"detail": _QUOTA_MESSAGES[reason], "reason": reason}, status_code=429)
+    return None
+
+
 @app.post("/feedback")
-def feedback(fb: Feedback):
-    """Append a thumbs-up/down to a JSONL log — read back by eval/harvest_feedback.py.
+async def feedback(fb: Feedback, request: Request):
+    """Record a thumbs-up/down — read back by eval/harvest_feedback.py (locally) or from the
+    `feedback` table (hosted: the serverless filesystem is read-only; migration 003).
 
     Retrieval context is recorded alongside the vote so a failure can be triaged later
     without re-running the query (which costs a full rerank, and on CPU that is minutes).
     Lists are truncated on write rather than rejected on input: a payload slightly over
     the expected size should still record the vote, not 422 away a real user's signal."""
+    retrieved = [{"source": s.source, "score": s.score} for s in fb.retrieved[:8]]
+    if settings.hosted:
+        async with request.app.state.pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO feedback (vote, question, answer_preview, abstained, kind, "
+                "top_score, translated_query, retrieved) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (fb.vote, fb.question, fb.answer_preview[:200], fb.abstained, fb.kind,
+                 fb.top_score, fb.translated_query, json.dumps(retrieved, ensure_ascii=False)),
+            )
+        return {"ok": True}
     rec = {"ts": time.time(), "vote": fb.vote,
            "question": fb.question, "answer_preview": fb.answer_preview[:200],
            "abstained": fb.abstained, "kind": fb.kind, "top_score": fb.top_score,
-           "translated_query": fb.translated_query,
-           "retrieved": [{"source": s.source, "score": s.score} for s in fb.retrieved[:8]]}
-    with _FEEDBACK_LOCK, open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+           "translated_query": fb.translated_query, "retrieved": retrieved}
+
+    def _append():
+        with _FEEDBACK_LOCK, open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    await asyncio.to_thread(_append)
     return {"ok": True}
 
 
@@ -160,11 +194,13 @@ def manifest():
 
 
 @app.post("/retrieve", response_model=RetrieveResponse)
-async def retrieve(payload: Question, conn: AsyncConnection = Depends(get_conn)):
+async def retrieve(payload: Question, request: Request, conn: AsyncConnection = Depends(get_conn)):
     """Retrieval-only: hybrid search + rerank, no LLM generation. Exists for eval/introspection
     (e.g. eval/eval_pipeline.py) so measuring retrieval accuracy/latency doesn't pay for a full
     CPU/GPU generation call per query -- /ask/stream bundles both and would badly pollute a
     latency measurement meant to isolate retrieval."""
+    if (rejection := await _quota_rejection(request)) is not None:
+        return rejection
     try:
         rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, payload.question)
     except TorchWorkerBusy as exc:
@@ -210,6 +246,9 @@ async def ask_stream(payload: Question, request: Request):
     NDJSON frame instead, so the client's parser gets an explicit end state instead of hanging
     on a `done` frame that will never arrive.
     """
+    if (rejection := await _quota_rejection(request)) is not None:
+        return rejection
+
     async def gen():
         try:
             async with request.app.state.pool.connection() as conn:

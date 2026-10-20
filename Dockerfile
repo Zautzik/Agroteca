@@ -27,20 +27,20 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Install DEPENDENCIES ONLY first, so this heavy layer (now including torch + transformers) is
+# Install DEPENDENCIES ONLY first, so this heavy layer (torch + transformers: the `local` extra) is
 # keyed on the lockfile alone and survives every source edit -- only a dependency change pays
 # the reinstall.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra local
 
 # Then the project itself -- a thin, fast-changing layer on top of the cached dependency tree.
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY warmup.py ./warmup.py
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra local
 
 
 # ---- model-bake stage: download the embedder + reranker weights and run one warm forward pass

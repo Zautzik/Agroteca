@@ -89,6 +89,8 @@ A negative result kept in the record rather than discarded: a controlled `e5-lar
 
 ## Deployment: Fully Containerized
 
+Two profiles run the same models. The containerized GPU stack below is the measured reference. A free public demo (`AGROTECA_PROFILE=hosted`: Neon, the same embedder through ONNX Runtime, the same reranker through Jina's API, generation through Groq) is described in [`DEPLOY.md`](DEPLOY.md#public-demo-at-0-agroteca_profilehosted), including the parity check it must pass first.
+
 ```bash
 docker compose up -d
 ```

@@ -14,9 +14,8 @@ initializes exactly once, in exactly one thread, for the life of the process.
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+import sys
 from typing import Callable, TypeVar
-
-import torch
 
 T = TypeVar("T")
 
@@ -36,7 +35,10 @@ _FRAGMENTATION_THRESHOLD_BYTES = 1024 * 1024 * 1024  # 1 GiB reserved-but-unallo
 def _reclaim_if_fragmented() -> None:
     """Runs on the same dedicated worker thread as the torch call it follows -- CUDA calls stay
     on the thread that owns the context, not on whichever thread happens to await the future."""
-    if not torch.cuda.is_available():
+    # torch is only imported if some caller already loaded it (the local profile): the hosted
+    # profile routes ONNX/HTTP calls through this same worker and ships without torch at all.
+    torch = sys.modules.get("torch")
+    if torch is None or not torch.cuda.is_available():
         return
     gap = torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
     if gap > _FRAGMENTATION_THRESHOLD_BYTES:

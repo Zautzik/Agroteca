@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{data/**,docs/**,eval/**,results/**,scripts/**,tests/**,notes.md,DATA_GOVERNANCE.md,Dockerfile,docker-compose.yml,docker-entrypoint.sh,stream_client.py,warmup.py}"
+    }
+  }
+}

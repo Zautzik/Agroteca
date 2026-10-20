@@ -11,8 +11,6 @@ the configured model's dimension — swapping the model is a schema change, not 
 from functools import lru_cache
 
 import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
 
 from agroteca.config import settings
 
@@ -36,14 +34,19 @@ _IS_E5 = _is_e5(settings.embed_model)
 
 
 @lru_cache(maxsize=1)
-def _model() -> SentenceTransformer:
+def _model():
+    # Imported here, not at module top: the hosted profile ships without torch (it embeds through
+    # ONNX Runtime -- see agroteca.ingest.onnx_embed), so importing this module must not need it.
+    from sentence_transformers import SentenceTransformer
     # Downloads the weights on first use, then caches on disk; resident on settings.device
     # for the process lifetime (moving a loaded model between devices is not free).
     return SentenceTransformer(settings.embed_model, device=settings.resolved_device)
 
 
 def embed_passages(texts: list[str]) -> list[np.ndarray]:
-    """Embed document chunks."""
+    """Embed document chunks. Always the torch path: ingestion runs on the developer machine,
+    so the index is built by the reference implementation in every profile."""
+    import torch
     with torch.inference_mode():
         vecs = _model().encode(_as_passages(texts, _IS_E5), batch_size=settings.batch_size,
                                convert_to_numpy=True, show_progress_bar=False)
@@ -51,6 +54,10 @@ def embed_passages(texts: list[str]) -> list[np.ndarray]:
 
 
 def embed_query(text: str) -> np.ndarray:
-    """Embed a single query."""
+    """Embed a single query: torch locally, the same model through ONNX Runtime when hosted."""
+    if settings.hosted:
+        from agroteca.ingest.onnx_embed import embed_query_onnx
+        return embed_query_onnx(_as_query(text, _IS_E5))
+    import torch
     with torch.inference_mode():
         return _model().encode(_as_query(text, _IS_E5), convert_to_numpy=True, show_progress_bar=False)

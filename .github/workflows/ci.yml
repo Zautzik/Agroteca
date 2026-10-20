@@ -15,11 +15,30 @@ jobs:
           enable-cache: true
       - name: Set up Python
         run: uv python install
-      - name: Install dependencies (exactly as locked)
-        run: uv sync --locked --all-groups
+      - name: Install dependencies (exactly as locked, with the local reference stack)
+        run: uv sync --locked --all-groups --extra local
       - name: Validate golden set
         run: uv run --locked python eval/validate_golden.py
       - name: Unit tests
         run: >
           uv run --locked pytest -q
           --deselect tests/test_scoring.py::test_reranker_scores_a_relevant_chunk_higher_than_an_irrelevant_one
+
+  # The public demo's dependency set, exactly as the serverless platform installs it: base
+  # dependencies only, no torch. Proves the hosted app imports and its pieces work without them.
+  hosted:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install
+      - name: Install hosted dependencies only (no torch)
+        run: uv sync --locked --group dev
+      - name: Confirm torch is absent
+        run: uv run --locked python -c "import importlib.util as u, sys; sys.exit(u.find_spec('torch') is not None)"
+      - name: Hosted tests
+        run: uv run --locked pytest -q tests/test_hosted.py

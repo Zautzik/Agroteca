@@ -105,7 +105,9 @@ docker compose up -d
 docker exec -i agroteca-pgvector psql -U postgres -d agroteca < migrations/001_init.sql
 docker exec -i agroteca-pgvector psql -U postgres -d agroteca < migrations/002_tsv_simple.sql
 
-# 2. Ingest ONLY the deployable corpus (LOCAL_MODE off -> no copyrighted docs in the DB)
+# 2. Ingest ONLY the deployable corpus (LOCAL_MODE off -> no copyrighted docs in the DB).
+#    The reference stack (torch, sentence-transformers, Ollama, PyMuPDF) is the `local` extra.
+uv sync --extra local
 AGROTECA_LOCAL_MODE=0 uv run python -m agroteca.ingest.run
 
 # 3. Point generation at a fast host, then run the server (production: no --reload)
@@ -159,6 +161,72 @@ backend simply doesn't scale to them.
 
 Use the flag for a quick look at the UI or a short request. For anything long-running, concurrent,
 or user-facing, run the container — Linux uses `epoll` and has none of this.
+
+## Public demo at $0 (`AGROTECA_PROFILE=hosted`)
+
+A free, card-free deployment of the **same models** the eval measures, so a public number is
+measured rather than assumed:
+
+| Piece | Local profile (reference) | Hosted profile (public demo) |
+|---|---|---|
+| Database | Postgres + pgvector (Docker) | Neon Free (pgvector, scales to zero; open + synthetic tiers only) |
+| Query embedding | MiniLM via sentence-transformers / torch | the same MiniLM via ONNX Runtime, in the app (no torch) |
+| Rerank | jina-reranker-v2 via torch | the same jina-reranker-v2 via Jina's rerank API |
+| Generation + query translation | Ollama (`qwen2.5:3b`) | an OpenAI-compatible API (Groq) |
+| App | uvicorn / Docker | Vercel Hobby (`app.py`, `vercel.json`) |
+
+Ingestion always runs on the machine that holds the PDFs, with the local stack, so the index is
+built by the reference implementation in both profiles.
+
+**Hosted settings** (set in the Vercel project's environment variables, never committed):
+
+| Env var | Value |
+|---|---|
+| `AGROTECA_PROFILE` | `hosted` |
+| `AGROTECA_DB_URL` | Neon **pooled** connection string |
+| `AGROTECA_DB_POOL_MIN` | `1` |
+| `AGROTECA_JINA_API_KEY` | Jina key |
+| `AGROTECA_GEN_API_KEY` | Groq key |
+| `AGROTECA_OPENAI_MODEL` | a Groq model id that exists in your console today (default `llama-3.3-70b-versatile`) |
+| `AGROTECA_GEN_TIMEOUT` / `AGROTECA_TRANSLATE_TIMEOUT` | `60` / `15` |
+| `AGROTECA_ONNX_MODEL_FILE` | a variant that **passed** `eval/parity_check.py` |
+| `AGROTECA_ONNX_MODEL_REVISION` | the embedder repo commit the parity check ran against |
+| `AGROTECA_DAILY_REQUEST_CAP` / `AGROTECA_PER_IP_HOURLY_CAP` | `20` / `5` |
+| `AGROTECA_IP_HASH_SALT` | a long random string |
+
+**Order of operations** (each step has a check; don't skip ahead):
+
+1. Create the Neon project. With its **direct** (non-pooled) URL in `AGROTECA_DB_URL`, run
+   `uv run python scripts/apply_migrations.py`, then
+   `AGROTECA_LOCAL_MODE=0 uv run python -m agroteca.ingest.run`.
+   Check: `SELECT tier, count(*) FROM chunks GROUP BY tier` shows only `open` and `synthetic`.
+2. `uv run python eval/parity_check.py --db` (same URL, Jina key in `.env`). Check
+   `results/parity.md`: pick an ONNX variant with min cosine >= 0.999 whose size leaves room in
+   the function's temporary disk (aim under ~300 MB); the rerank section must show strong rank
+   agreement and the score range the UI's low-confidence cutoff assumes.
+3. Import the repo in Vercel, set the variables above, deploy a preview. Check `/health`, then
+   one Spanish and one English question on a phone-sized screen.
+4. Measure what is deployed: with the per-IP cap temporarily `0`,
+   `uv run python eval/eval_pipeline.py --base-url <preview-url>`; record it as a `hosted` row in
+   `eval/results.csv` and restore the cap.
+5. Only then point the domain at it.
+
+**Free-tier ceilings, and what happens at each.** No card is on file anywhere, so every ceiling
+stops the service rather than billing it:
+
+| Service | Free allowance | At the ceiling |
+|---|---|---|
+| Neon | 0.5 GB storage, 100 CU-hours/month, scale-to-zero after 5 min idle | compute suspends until next month |
+| Vercel Hobby | function limits per the Hobby plan; personal, non-commercial use | requests fail until reset |
+| Groq | per-model rate limits (requests/tokens per minute and day) | 429 until the window resets |
+| Jina | **10M tokens per key, once**, non-commercial | rerank calls fail; the demo stops answering |
+
+The Jina allowance is the binding one: a bilingual question reranks up to ~40 chunks twice,
+roughly 40-50k tokens, so 10M tokens is on the order of 200 questions. The daily and per-IP caps
+exist to make that last; `AGROTECA_RERANK_CANDIDATES` trades recall for tokens if needed.
+
+**Cold starts.** A new serverless instance downloads the ONNX model on its first request and Neon
+wakes from zero, so the first question after an idle period is slow; later ones are not.
 
 ## Operational notes
 

@@ -2,11 +2,9 @@ import asyncio
 import json
 import time
 
-import httpx
-from ollama import AsyncClient, Client
-
 from agroteca.config import settings
 from agroteca.ingest import store
+from agroteca.llm import make_llm
 from agroteca.retrieve.rerank import (
     rerank_scored,
     rerank_scored_async,
@@ -16,18 +14,20 @@ from agroteca.retrieve.rerank import (
 )
 from agroteca.retrieve.translate import translate_query
 
-# One reusable client. Short connect timeout (if Ollama is down, fail fast) but a generous
-# read timeout, because CPU prompt-eval can take a while to reach the first token; a truly
-# hung model still errors after gen_timeout instead of hanging forever. Model + host are
-# config knobs, so a deploy swaps to a hosted/smaller model via env vars, not source edits.
-_client = Client(host=settings.gen_base_url,
-                 timeout=httpx.Timeout(settings.gen_timeout, connect=10.0))
-# Async twin, for the FastAPI serving path -- see stream_ndjson_async. Keeping both (rather
-# than routing the sync CLI/eval path through the async client) means /ask/stream never blocks
-# the event loop on Ollama I/O, without touching the sync call sites below.
-_async_client = AsyncClient(host=settings.gen_base_url,
-                            timeout=httpx.Timeout(settings.gen_timeout, connect=10.0))
-_GEN_OPTS = {"num_predict": settings.gen_num_predict}
+# One reusable generation backend (agroteca.llm): local Ollama, or an OpenAI-compatible API under
+# profile=hosted. Short connect timeout (if the backend is down, fail fast) but a generous read
+# timeout, because CPU prompt-eval can take a while to reach the first token; a truly hung model
+# still errors after gen_timeout instead of hanging forever. Created lazily so importing this
+# module never needs a running backend or a key. Both sync (CLI/eval) and async (FastAPI) calls
+# go through it, so /ask/stream never blocks the event loop on generation I/O.
+_llm = None
+
+
+def _backend():
+    global _llm
+    if _llm is None:
+        _llm = make_llm(settings.gen_timeout)
+    return _llm
 
 SYSTEM_PROMPT = """You are an agronomy assistant. Answer the QUESTION using ONLY the CONTEXT chunks provided.
 
@@ -70,30 +70,15 @@ def format_context(rows, pages: dict | None = None) -> str:
 
 
 def ask_ollama(system: str, user: str) -> str:
-    """Send a system+user prompt to the local model, return its text reply."""
-    resp = _client.chat(
-        model=settings.gen_model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        options=_GEN_OPTS,
-    )
-    return resp["message"]["content"]
+    """Send a system+user prompt to the generation backend, return its text reply.
+    (Name kept for existing callers; under profile=hosted it is the OpenAI-compatible API.)"""
+    return _backend().chat(system, user, settings.gen_num_predict)
 
 
 async def ask_ollama_async(system: str, user: str) -> str:
     """Async twin of ask_ollama, for callers already on an event loop (eval scripts composing
     the production async retrieval + generation path)."""
-    resp = await _async_client.chat(
-        model=settings.gen_model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        options=_GEN_OPTS,
-    )
-    return resp["message"]["content"]
+    return await _backend().achat(system, user, settings.gen_num_predict)
 
 
 def answer(conn, question: str, k: int = 5) -> str:
@@ -110,17 +95,8 @@ def answer_stream(conn, question: str, k: int = 5):
     pages = {cid: pg for cid, (_t, pg) in _meta_for(conn, [r[0] for r in rows]).items()}
     context = format_context(rows, pages)
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
-    stream = _client.chat(
-        model=settings.gen_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
-        stream=True,                                       # <- Ollama now yields chunks, not one blob
-        options=_GEN_OPTS,
-    )
-    for chunk in stream:
-        yield chunk["message"]["content"]                  # <- hand over each token as it arrives
+    # stream: the backend yields chunks, not one blob; hand over each token as it arrives
+    yield from _backend().chat_stream(SYSTEM_PROMPT, user, settings.gen_num_predict)
 
 
 def _meta_for(conn, chunk_ids):
@@ -295,17 +271,7 @@ def stream_ndjson(question: str, context: str):
     """Generation phase (no DB connection held): yield token frames, then a done frame."""
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
     g0 = time.perf_counter()
-    stream = _client.chat(
-        model=settings.gen_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
-        stream=True,
-        options=_GEN_OPTS,
-    )
-    for chunk in stream:
-        piece = chunk["message"]["content"]
+    for piece in _backend().chat_stream(SYSTEM_PROMPT, user, settings.gen_num_predict):
         if piece:
             yield json.dumps({"type": "token", "text": piece}) + "\n"
     yield json.dumps({"type": "done", "generation_ms": int((time.perf_counter() - g0) * 1000)}) + "\n"
@@ -313,20 +279,10 @@ def stream_ndjson(question: str, context: str):
 
 async def stream_ndjson_async(question: str, context: str):
     """Async twin of stream_ndjson, for the FastAPI serving path: yield token frames, then a
-    done frame, via ollama.AsyncClient so generation never blocks the event loop."""
+    done frame, via the backend's async stream so generation never blocks the event loop."""
     user = f"CONTEXT:\n{context}\n\nQUESTION: {question}"
     g0 = time.perf_counter()
-    stream = await _async_client.chat(
-        model=settings.gen_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
-        stream=True,
-        options=_GEN_OPTS,
-    )
-    async for chunk in stream:
-        piece = chunk["message"]["content"]
+    async for piece in _backend().achat_stream(SYSTEM_PROMPT, user, settings.gen_num_predict):
         if piece:
             yield json.dumps({"type": "token", "text": piece}) + "\n"
     yield json.dumps({"type": "done", "generation_ms": int((time.perf_counter() - g0) * 1000)}) + "\n"

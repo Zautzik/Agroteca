@@ -626,6 +626,12 @@
     let firstT = 0, tokCount = 0;
     try {
       const resp = await fetch('/ask/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), signal: abortCtrl.signal });
+      if (resp.status === 429) {
+        // Public-demo quota (see agroteca.quota): the server explains which limit was hit.
+        let detail = 'HTTP 429';
+        try { detail = (await resp.json()).detail || detail; } catch (_) {}
+        const err = new Error(detail); err.quota = true; throw err;
+      }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
       const reader = resp.body.getReader();
@@ -677,7 +683,8 @@
         const main = answer.querySelector('.answer-main');
         const note = '<div class="stopped">■ ' + I18N[currentLang].stopped + '</div>';
         if (main) main.insertAdjacentHTML('beforeend', note); else answer.innerHTML = note;
-      } else { answer.textContent = I18N[currentLang].error(e.message); }
+      } else if (e.quota) { answer.textContent = e.message; }
+      else { answer.textContent = I18N[currentLang].error(e.message); }
     } finally {
       clearInterval(elapsedTimer); ask.disabled = false; abortCtrl = null;
     }
