@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     jina_rerank_url: str = "https://api.jina.ai/v1/rerank"
     jina_rerank_model: str = "jina-reranker-v2-base-multilingual"
     jina_timeout: float = 30.0
+    # Jina's free key also caps tokens per minute. On a 429/503 the call waits (Retry-After, else
+    # 2s, 4s) and retries this many times before giving up with a friendly "busy" error.
+    jina_max_retries: int = 2
 
     # hosted: generation via an OpenAI-compatible chat-completions API (Groq by default).
     gen_api_key: str = ""

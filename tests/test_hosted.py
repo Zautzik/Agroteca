@@ -71,8 +71,9 @@ def test_jina_rejects_a_response_that_skips_a_document():
 
 
 def test_jina_http_errors_are_raised_not_swallowed():
+    # A non-rate-limit failure (bad key) still raises; 429/503 have their own retry path below.
     with pytest.raises(httpx.HTTPStatusError):
-        _jina(lambda r: httpx.Response(429, json={"detail": "quota"})).rerank("q", ["a"])
+        _jina(lambda r: httpx.Response(401, json={"detail": "bad key"})).rerank("q", ["a"])
 
 
 def test_jina_requires_a_key():
@@ -387,3 +388,64 @@ def test_onnx_runtime_points_hf_caches_at_writable_tmp(monkeypatch, tmp_path):
     onnx_embed._runtime.cache_clear()
     assert os.environ["HF_HOME"] == str(tmp_path / "hf-home")
     assert os.environ["HF_HUB_DISABLE_XET"] == "0"
+
+
+def _jina_with_waits(handler, retries=2):
+    from agroteca.retrieve.rerank import _JinaAPIReranker
+    waits = []
+    r = _JinaAPIReranker("https://jina.test/v1/rerank", "m", "k", 5.0,
+                         transport=httpx.MockTransport(handler), max_retries=retries,
+                         sleep=waits.append)
+    return r, waits
+
+
+def test_jina_rate_limit_is_retried_then_succeeds():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "3"})
+        return httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 0.7}]})
+
+    r, waits = _jina_with_waits(handler)
+    assert r.rerank("q", ["a"]) == [0.7]
+    assert len(calls) == 2 and waits == [3.0]           # honoured the server's Retry-After
+
+
+def test_jina_rate_limit_that_persists_is_a_clean_busy_not_a_crash():
+    from agroteca.retrieve.rerank import RerankerBusy
+    from agroteca.torch_runtime import TorchWorkerBusy
+
+    r, waits = _jina_with_waits(lambda request: httpx.Response(429))
+    with pytest.raises(RerankerBusy) as info:
+        r.rerank("q", ["a"])
+    assert isinstance(info.value, TorchWorkerBusy)      # -> the API's existing 503 path
+    assert waits == [2.0, 4.0]                          # backoff, bounded retries
+
+
+def test_retrieve_returns_503_not_500_when_the_reranker_is_busy(monkeypatch):
+    """End to end through FastAPI: a persistent upstream rate limit must reach the client as a
+    readable 503, the way the hosted demo's visitors would see it."""
+    from fastapi.testclient import TestClient
+    from agroteca import api
+    from agroteca.retrieve.rerank import RerankerBusy
+
+    async def busy(conn, question):
+        raise RerankerBusy("The demo is busy right now")
+
+    async def no_quota(request):
+        return None
+
+    async def fake_conn():
+        yield object()
+
+    monkeypatch.setattr(api, "retrieve_ranked_async", busy)
+    monkeypatch.setattr(api, "_quota_rejection", no_quota)
+    api.app.dependency_overrides[api.get_conn] = fake_conn
+    try:
+        client = TestClient(api.app)          # no `with`: lifespan (models, DB pool) not started
+        resp = client.post("/retrieve", json={"question": "hola"})
+    finally:
+        api.app.dependency_overrides.clear()
+    assert resp.status_code == 503 and "busy" in resp.json()["detail"]

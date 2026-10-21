@@ -92,7 +92,7 @@ def load_golden(path: Path) -> list[GoldenQuestion]:
 
 
 async def fire_one(client: httpx.AsyncClient, sem: asyncio.Semaphore,
-                   q: GoldenQuestion, k: int) -> QueryResult:
+                   q: GoldenQuestion, k: int, delay: float = 0.0) -> QueryResult:
     """Issue one /retrieve call, validate the response shape, and score it. Never raises --
     a request/validation failure becomes a QueryResult with `error` set (and counts as a miss),
     so one bad response can't take down the whole concurrent batch."""
@@ -106,6 +106,9 @@ async def fire_one(client: httpx.AsyncClient, sem: asyncio.Semaphore,
         except (httpx.HTTPError, ValidationError) as exc:
             return QueryResult(id=q.id, latency_ms=(time.perf_counter() - t0) * 1000,
                                rank=None, hit=False, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            if delay:                   # pace a rate-limited deployment (held inside the slot)
+                await asyncio.sleep(delay)
 
     rows = [(c.source_file, c.text) for c in parsed.sources[:k]]
     rank = answer_rank(rows, q.source_file, q.must_contain) if q.must_contain else None
@@ -114,7 +117,7 @@ async def fire_one(client: httpx.AsyncClient, sem: asyncio.Semaphore,
 
 
 async def run(base_url: str, k: int, concurrency: int, timeout: float,
-              limit: Optional[int] = None) -> list[QueryResult]:
+              limit: Optional[int] = None, delay: float = 0.0) -> list[QueryResult]:
     questions = load_golden(GOLDEN)
     scorable = [q for q in questions if q.answerable and q.must_contain]
     total_scorable = len(scorable)
@@ -134,7 +137,7 @@ async def run(base_url: str, k: int, concurrency: int, timeout: float,
             raise SystemExit(f"could not reach {base_url}/retrieve -- is the server running, and is "
                              f"--timeout generous enough? ({type(exc).__name__}: {exc})")
 
-        results = await asyncio.gather(*[fire_one(client, sem, q, k) for q in scorable])
+        results = await asyncio.gather(*[fire_one(client, sem, q, k, delay) for q in scorable])
     return list(results)
 
 
@@ -182,10 +185,14 @@ def main() -> None:
                          "is generous for that path. A GPU server needs far less.")
     ap.add_argument("--limit", type=int, default=None,
                     help="score only the first N answerable questions (fast smoke test)")
+    ap.add_argument("--delay", type=float, default=0.0,
+                    help="seconds each worker waits after a request -- pacing for a deployment "
+                         "behind a rate-limited API (the hosted demo: --concurrency 1 --delay 20)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    results = asyncio.run(run(args.base_url, args.k, args.concurrency, args.timeout, args.limit))
+    results = asyncio.run(run(args.base_url, args.k, args.concurrency, args.timeout, args.limit,
+                              args.delay))
     print()
     print(render_markdown(results, args.k, args.base_url, args.concurrency))
 
