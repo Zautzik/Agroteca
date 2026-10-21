@@ -119,6 +119,13 @@ def main(use_db: bool, min_cosine: float) -> None:
             print(f"{filename}: dense top-20 overlap mean={np.mean(overlaps):.3f} min={min(overlaps):.3f}")
 
         if settings.jina_api_key:
+            # Fetch every candidate pool BEFORE loading the local cross-encoder, then close the
+            # connection: loading it and reranking on CPU take minutes, and a managed Postgres
+            # (Neon) drops a connection left idle that long.
+            pools = [[row[2] for row in hybrid_search(conn, q, k=settings.rerank_candidates,
+                                                      tiers=tiers)]
+                     for q in questions[:5]]
+            conn.close()
             from agroteca.retrieve.rerank import _CrossEncoder, _JinaAPIReranker
             local = _CrossEncoder(settings.rerank_model, settings.resolved_device,
                                   settings.rerank_model_revision)
@@ -128,9 +135,7 @@ def main(use_db: bool, min_cosine: float) -> None:
             lines += ["", "## 3. Rerank parity (local cross-encoder vs Jina API, same pools)", "",
                       "| Question | Spearman | Top-5 agreement | Local range | API range |",
                       "|---|---|---|---|---|"]
-            for i, q in enumerate(questions[:5]):
-                pool = [row[2] for row in hybrid_search(conn, q, k=settings.rerank_candidates,
-                                                        tiers=tiers)]
+            for i, (q, pool) in enumerate(zip(questions[:5], pools)):
                 a, b = local.rerank(q, pool), api.rerank(q, pool)
                 top_a = set(np.argsort(a)[::-1][:5]); top_b = set(np.argsort(b)[::-1][:5])
                 lines.append(f"| q{i + 1} | {_spearman(a, b):.3f} | {len(top_a & top_b)}/5 | "
@@ -138,6 +143,7 @@ def main(use_db: bool, min_cosine: float) -> None:
                 print(f"q{i + 1}: spearman={_spearman(a, b):.3f} top5={len(top_a & top_b)}/5 "
                       f"local=[{min(a):.3f},{max(a):.3f}] api=[{min(b):.3f},{max(b):.3f}]")
         else:
+            conn.close()
             lines += ["", "## 3. Rerank parity", "", "Skipped: AGROTECA_JINA_API_KEY not set."]
 
     lines += ["", f"Passing ONNX variants (min cosine >= {min_cosine}): "
