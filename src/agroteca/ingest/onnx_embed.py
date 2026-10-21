@@ -29,6 +29,13 @@ def mean_pool(last_hidden_state: np.ndarray, attention_mask: np.ndarray) -> np.n
 @lru_cache(maxsize=1)
 def _runtime():
     """Download (once per cold instance) and load the tokenizer + ONNX session."""
+    import os
+    # Serverless filesystems are read-only except /tmp. cache_dir covers the model files, but
+    # huggingface_hub keeps other state under HF_HOME (~/.cache), and its xet download backend
+    # writes its own cache there -- which crashed the first Vercel deploy. Defaults only: an
+    # explicit environment value still wins. Must be set before huggingface_hub is imported.
+    os.environ.setdefault("HF_HOME", str(settings.onnx_cache_dir / "hf-home"))
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     import onnxruntime as ort
     from huggingface_hub import hf_hub_download
     from tokenizers import Tokenizer

@@ -30,7 +30,7 @@ def translate_query(question: str) -> str | None:
     try:
         if _llm is None:
             _llm = make_llm(settings.translate_timeout)
-        out = _llm.chat(None, _PROMPT.format(q=question), 128).strip().strip('"').strip()
+        out = _llm.chat(None, _PROMPT.format(q=question), settings.translate_max_tokens).strip().strip('"').strip()
         # Guard the degenerate cases: empty, or the model echoed the question unchanged.
         return out if out and out.lower() != question.strip().lower() else None
     except Exception:

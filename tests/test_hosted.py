@@ -346,3 +346,44 @@ def test_quota_rejection_is_a_429_with_a_readable_detail(monkeypatch):
     resp = TestClient(api.app).post("/ask/stream", json={"question": "hola"})
     assert resp.status_code == 429
     assert "limit" in resp.json()["detail"]
+
+
+def test_reasoning_effort_is_sent_only_when_configured():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    t = httpx.MockTransport(handler)
+    OpenAICompatible("https://x/v1", "k", "openai/gpt-oss-120b", 5.0, transport=t,
+                     reasoning_effort="low").chat(None, "q", 32)
+    OpenAICompatible("https://x/v1", "k", "plain-model", 5.0, transport=t).chat(None, "q", 32)
+    assert bodies[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in bodies[1]       # a non-reasoning model would reject it
+
+
+def test_onnx_runtime_points_hf_caches_at_writable_tmp(monkeypatch, tmp_path):
+    """Vercel's filesystem is read-only outside /tmp; huggingface_hub's xet backend crashed the
+    first deploy by writing under ~/.cache. _runtime must default HF_HOME into the cache dir and
+    disable xet -- without overriding values set explicitly in the environment."""
+    import os
+    from agroteca.ingest import onnx_embed
+
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.setenv("HF_HUB_DISABLE_XET", "0")                 # explicit value must survive
+    monkeypatch.setattr(onnx_embed.settings, "onnx_cache_dir", tmp_path)
+
+    class Stop(Exception):
+        pass
+
+    def boom(*a, **kw):
+        raise Stop
+    import huggingface_hub
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", boom)
+    onnx_embed._runtime.cache_clear()
+    with pytest.raises(Stop):
+        onnx_embed._runtime()
+    onnx_embed._runtime.cache_clear()
+    assert os.environ["HF_HOME"] == str(tmp_path / "hf-home")
+    assert os.environ["HF_HUB_DISABLE_XET"] == "0"

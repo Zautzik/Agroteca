@@ -187,7 +187,8 @@ built by the reference implementation in both profiles.
 | `AGROTECA_DB_POOL_MIN` | `1` |
 | `AGROTECA_JINA_API_KEY` | Jina key |
 | `AGROTECA_GEN_API_KEY` | Groq key |
-| `AGROTECA_OPENAI_MODEL` | a Groq model id that exists in your console today (default `llama-3.3-70b-versatile`) |
+| `AGROTECA_OPENAI_MODEL` | a Groq model id that exists in your console today (default `openai/gpt-oss-120b`; `llama-3.3-70b-versatile` was retired in Aug 2026 and now returns 404) |
+| `AGROTECA_OPENAI_REASONING_EFFORT` | `low` for a reasoning model such as gpt-oss; empty for a non-reasoning model |
 | `AGROTECA_GEN_TIMEOUT` / `AGROTECA_TRANSLATE_TIMEOUT` | `60` / `15` |
 | `AGROTECA_ONNX_MODEL_FILE` | a variant that **passed** `eval/parity_check.py` |
 | `AGROTECA_ONNX_MODEL_REVISION` | the embedder repo commit the parity check ran against |
