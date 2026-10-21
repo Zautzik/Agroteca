@@ -50,20 +50,25 @@ def _sse_deltas(lines: Iterator[str]) -> Iterator[str]:
 class OpenAICompatible:
     def __init__(self, base_url: str, api_key: str, model: str, timeout: float,
                  transport: httpx.BaseTransport | None = None,
-                 async_transport: httpx.AsyncBaseTransport | None = None):
+                 async_transport: httpx.AsyncBaseTransport | None = None,
+                 reasoning_effort: str = ""):
         if not api_key:
             raise RuntimeError("AGROTECA_GEN_API_KEY is not set (required by profile=hosted)")
         headers = {"Authorization": f"Bearer {api_key}"}
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model
+        self._reasoning_effort = reasoning_effort
         self._timeout = httpx.Timeout(timeout, connect=10.0)
         self._client = httpx.Client(timeout=self._timeout, headers=headers, transport=transport)
         self._headers = headers
         self._async_transport = async_transport
 
     def _body(self, system, user, max_tokens, stream):
-        return {"model": self._model, "messages": _messages(system, user),
+        body = {"model": self._model, "messages": _messages(system, user),
                 "max_tokens": max_tokens, "temperature": 0, "stream": stream}
+        if self._reasoning_effort:            # reasoning models only; others reject the field
+            body["reasoning_effort"] = self._reasoning_effort
+        return body
 
     def chat(self, system: str | None, user: str, max_tokens: int) -> str:
         resp = self._client.post(self._url, json=self._body(system, user, max_tokens, False))
@@ -134,5 +139,6 @@ class Ollama:
 def make_llm(timeout: float):
     if settings.hosted:
         return OpenAICompatible(settings.openai_base_url, settings.gen_api_key,
-                                settings.openai_model, timeout)
+                                settings.openai_model, timeout,
+                                reasoning_effort=settings.openai_reasoning_effort)
     return Ollama(settings.gen_base_url, settings.gen_model, timeout)

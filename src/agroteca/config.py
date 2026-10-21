@@ -70,7 +70,11 @@ class Settings(BaseSettings):
     # hosted: generation via an OpenAI-compatible chat-completions API (Groq by default).
     gen_api_key: str = ""
     openai_base_url: str = "https://api.groq.com/openai/v1"
-    openai_model: str = "llama-3.3-70b-versatile"
+    # Groq retired llama-3.3-70b-versatile (Aug 2026) and recommends gpt-oss-120b. It is a
+    # reasoning model: its hidden reasoning counts against max_tokens, so effort is kept low.
+    # Set openai_reasoning_effort="" for a non-reasoning model (the field would be rejected).
+    openai_model: str = "openai/gpt-oss-120b"
+    openai_reasoning_effort: str = "low"
 
     # hosted: serverless-friendly DB pool, and protection for the free-tier quotas.
     db_pool_min: int = 5
@@ -128,6 +132,9 @@ class Settings(BaseSettings):
     # than the baseline. Costs one LLM translation call per query (the app already runs an LLM).
     translate_queries: bool = True
     translate_timeout: float = 60.0
+    # Output cap for the translation call. A plain model needs ~40 tokens; a reasoning model
+    # spends part of the budget on reasoning before the answer, so the cap leaves room for that.
+    translate_max_tokens: int = 512
 
     # --- chunking ---
     # KNOWN CEILING: the MiniLM embedder truncates at ~128 tokens (max_seq_length), so the
