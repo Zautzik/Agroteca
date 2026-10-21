@@ -320,6 +320,8 @@
       loading: 'Consultando el corpus…',
       stageLabels: { seed: 'Enviado', translating: 'Traduciendo', reranking: 'Comparando', generating: 'Generando', done: 'Listo' },
       footer: 'Local · sin nube · fundado en un corpus curado y gobernado por licencia.',
+      hintHosted: 'Ctrl+Enter enviar · / enfocar · ? atajos',
+      footerHosted: 'Demo pública · solo fuentes de licencia abierta · cada respuesta cita su fuente.',
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
       grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar', share: 'Enlace', shareCopied: 'Enlace copiado',
       abstainTitle: 'Fuera del corpus', abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
@@ -346,6 +348,8 @@
       loading: 'Searching the corpus…',
       stageLabels: { seed: 'Sent', translating: 'Translating', reranking: 'Reranking', generating: 'Generating', done: 'Done' },
       footer: 'Local · no cloud · grounded in a curated, license-governed corpus.',
+      hintHosted: 'Ctrl+Enter send · / focus · ? shortcuts',
+      footerHosted: 'Public demo · open-license sources only · every answer cites its source.',
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
       grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export', share: 'Link', shareCopied: 'Link copied',
       abstainTitle: 'Outside the corpus', abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
@@ -411,13 +415,19 @@
     const L = I18N[currentLang].stats;
     el.textContent = statsData.chunks.toLocaleString() + ' ' + L[0] + ' · ' + statsData.documents + ' ' + L[1] + ' · ' + statsData.tiers + ' ' + L[2] + ' · ES/EN';
   }
+  // The local build runs offline on CPU; the public demo runs in the cloud on the open-license
+  // subset. /stats reports which, so the footer and hint never claim the wrong one.
+  function applyProfileText() {
+    const t = I18N[currentLang], hosted = statsData && statsData.profile === 'hosted';
+    document.getElementById('hint').textContent = hosted ? t.hintHosted : t.hint;
+    document.getElementById('footer').textContent = hosted ? t.footerHosted : t.footer;
+  }
   function setLang(lang) {
     const t = I18N[lang];
     currentLang = lang; document.documentElement.lang = lang;
     document.getElementById('tagline').innerHTML = t.tagline;
     ask.textContent = t.ask;
-    document.getElementById('hint').textContent = t.hint;
-    document.getElementById('footer').textContent = t.footer;
+    applyProfileText();
     document.getElementById('histTitle').textContent = t.historyTitle;
     document.getElementById('helpTitle').textContent = t.helpTitle;
     buildChips(t.chips);
@@ -574,7 +584,7 @@
   /* ---------- health + stats + shared link ---------- */
   function pollHealth() { fetch('/health').then(r => r.ok).catch(() => false).then(ok => { const d = document.getElementById('healthdot'); if (d) d.className = 'dot ' + (ok ? 'ok' : 'down'); }); }
   pollHealth(); setInterval(pollHealth, 20000);
-  fetch('/stats').then(r => r.json()).then(s => { statsData = s; renderStats(); }).catch(() => {});
+  fetch('/stats').then(r => r.json()).then(s => { statsData = s; renderStats(); applyProfileText(); }).catch(() => {});
 
   /* ---------- the life-cycle reel, now a real progress path ---------- */
   // Each stone is a real /ask/stream phase (see agroteca.generate.retrieve_ranked_with_progress);

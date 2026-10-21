@@ -129,7 +129,8 @@ async def stats(conn: AsyncConnection = Depends(get_conn)):
     chunks = (await (await conn.execute("SELECT count(*) FROM chunks")).fetchone())[0]
     docs = (await (await conn.execute("SELECT count(*) FROM documents")).fetchone())[0]
     tiers = (await (await conn.execute("SELECT count(DISTINCT tier) FROM chunks")).fetchone())[0]
-    return {"chunks": chunks, "documents": docs, "tiers": tiers}
+    # profile lets the UI describe the build honestly (offline local vs the public cloud demo).
+    return {"chunks": chunks, "documents": docs, "tiers": tiers, "profile": settings.profile}
 
 
 _QUOTA_MESSAGES = {

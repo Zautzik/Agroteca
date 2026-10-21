@@ -449,3 +449,27 @@ def test_retrieve_returns_503_not_500_when_the_reranker_is_busy(monkeypatch):
     finally:
         api.app.dependency_overrides.clear()
     assert resp.status_code == 503 and "busy" in resp.json()["detail"]
+
+
+def test_stats_reports_the_profile_so_the_ui_never_claims_offline_when_hosted(monkeypatch):
+    from fastapi.testclient import TestClient
+    from agroteca import api
+
+    class Cur:
+        async def fetchone(self):
+            return (7,)
+
+    class Conn:
+        async def execute(self, sql, params=None):
+            return Cur()
+
+    async def fake_conn():
+        yield Conn()
+
+    monkeypatch.setattr(api.settings, "profile", "hosted")
+    api.app.dependency_overrides[api.get_conn] = fake_conn
+    try:
+        body = TestClient(api.app).get("/stats").json()
+    finally:
+        api.app.dependency_overrides.clear()
+    assert body == {"chunks": 7, "documents": 7, "tiers": 7, "profile": "hosted"}
