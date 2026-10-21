@@ -6,6 +6,7 @@ cross-encoder reads each (query, chunk) pair *together* and re-scores them, floa
 the true answer to the front. It's slow, so we only run it on the hybrid pool
 (~20 candidates), never the whole corpus.
 """
+import time
 from functools import lru_cache
 
 import httpx
@@ -13,7 +14,7 @@ import httpx
 from agroteca import cache
 from agroteca.config import settings
 from agroteca.retrieve.hybrid import hybrid_search, hybrid_search_async
-from agroteca.torch_runtime import run_torch
+from agroteca.torch_runtime import TorchWorkerBusy, run_torch
 
 
 class _CrossEncoder:
@@ -41,6 +42,21 @@ class _CrossEncoder:
         return scores if isinstance(scores, list) else [scores]
 
 
+class RerankerBusy(TorchWorkerBusy):
+    """The hosted reranker refused for rate limiting even after retries. A TorchWorkerBusy
+    subclass on purpose: the API already turns that into a 503 (/retrieve) or a terminal error
+    frame (/ask/stream), so a busy minute reads as "try again", not as a crash."""
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before retrying: the server's Retry-After if it sent a number, else 2s,
+    4s, ... -- capped at 10s so a request never stalls for long."""
+    try:
+        return min(float(resp.headers.get("retry-after", "")), 10.0)
+    except ValueError:
+        return min(2.0 * (2 ** attempt), 10.0)
+
+
 class _JinaAPIReranker:
     """The same jina-reranker-v2-base-multilingual, served by Jina's rerank API (hosted profile).
 
@@ -49,7 +65,9 @@ class _JinaAPIReranker:
     the scores are scattered back into input order here -- the callers sort on their own."""
 
     def __init__(self, url: str, model: str, api_key: str, timeout: float,
-                 transport: httpx.BaseTransport | None = None):
+                 transport: httpx.BaseTransport | None = None,
+                 max_retries: int = 2, sleep=time.sleep):
+        self._max_retries, self._sleep = max_retries, sleep
         if not api_key:
             raise RuntimeError("AGROTECA_JINA_API_KEY is not set (required by profile=hosted)")
         self._model = model
@@ -60,10 +78,18 @@ class _JinaAPIReranker:
     def rerank(self, query: str, texts: list[str]) -> list[float]:
         if not texts:
             return []
-        resp = self._client.post(self._url, json={
-            "model": self._model, "query": query, "documents": texts,
-            "top_n": len(texts), "return_documents": False,
-        })
+        body = {"model": self._model, "query": query, "documents": texts,
+                "top_n": len(texts), "return_documents": False}
+        for attempt in range(self._max_retries + 1):
+            resp = self._client.post(self._url, json=body)
+            if resp.status_code not in (429, 503):
+                break
+            if attempt == self._max_retries:
+                # Out of retries: a clean "busy" (503 / NDJSON error frame via the API's
+                # TorchWorkerBusy handling), never an unhandled 500.
+                raise RerankerBusy("The demo is busy right now (rate limit reached) -- "
+                                   "please try again in a minute.")
+            self._sleep(_retry_delay(resp, attempt))
         resp.raise_for_status()
         scores = [float("-inf")] * len(texts)
         for item in resp.json()["results"]:
@@ -78,7 +104,8 @@ def _reranker():
     # Lazy + cached: the ~1.1 GB model downloads on first use, not on import.
     if settings.hosted:
         return _JinaAPIReranker(settings.jina_rerank_url, settings.jina_rerank_model,
-                                settings.jina_api_key, settings.jina_timeout)
+                                settings.jina_api_key, settings.jina_timeout,
+                                max_retries=settings.jina_max_retries)
     return _CrossEncoder(settings.rerank_model, settings.resolved_device, settings.rerank_model_revision)
 
 
