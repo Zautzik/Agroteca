@@ -323,6 +323,12 @@
       hintHosted: 'Ctrl+Enter enviar · / enfocar · ? atajos',
       footerHosted: 'Demo pública · solo fuentes de licencia abierta · cada respuesta cita su fuente.',
       error: (m) => 'Error: ' + m + ' — ¿está corriendo el servidor (uvicorn)?',
+      errorHosted: (m) => 'Error: ' + m + ' — inténtalo de nuevo en un minuto.',
+      busy: 'El sistema está a plena capacidad en este momento. Inténtalo de nuevo en un minuto.',
+      quota: {
+        daily_cap: 'La demo pública alcanzó el límite de preguntas de hoy. Inténtalo de nuevo mañana.',
+        ip_cap: 'Demasiadas preguntas desde esta conexión en la última hora. Inténtalo más tarde.'
+      },
       grounded: 'Fundado', copy: 'Copiar', copied: 'Copiado', exportLabel: 'Exportar', share: 'Enlace', shareCopied: 'Enlace copiado',
       abstainTitle: 'Fuera del corpus', abstainText: 'No está en las fuentes disponibles — y el sistema prefiere decirlo a inventarlo.',
       offrampCoversLabel: 'Lo que sí cubre este corpus',
@@ -351,6 +357,12 @@
       hintHosted: 'Ctrl+Enter send · / focus · ? shortcuts',
       footerHosted: 'Public demo · open-license sources only · every answer cites its source.',
       error: (m) => 'Error: ' + m + ' — is the server (uvicorn) running?',
+      errorHosted: (m) => 'Error: ' + m + ' — please try again in a minute.',
+      busy: 'The system is at capacity right now. Please try again in a minute.',
+      quota: {
+        daily_cap: 'The public demo has reached today\'s question limit. Please try again tomorrow.',
+        ip_cap: 'Too many questions from this connection in the last hour. Please try again later.'
+      },
       grounded: 'Grounded', copy: 'Copy', copied: 'Copied', exportLabel: 'Export', share: 'Link', shareCopied: 'Link copied',
       abstainTitle: 'Outside the corpus', abstainText: 'It\'s not in the available sources — and the system would rather say so than invent it.',
       offrampCoversLabel: 'What this corpus does cover',
@@ -416,11 +428,20 @@
     el.textContent = statsData.chunks.toLocaleString() + ' ' + L[0] + ' · ' + statsData.documents + ' ' + L[1] + ' · ' + statsData.tiers + ' ' + L[2] + ' · ES/EN';
   }
   // The local build runs offline on CPU; the public demo runs in the cloud on the open-license
-  // subset. /stats reports which, so the footer and hint never claim the wrong one.
+  // subset. /stats reports which, so the footer, hint and error text never claim the wrong one.
+  function isHosted() { return !!(statsData && statsData.profile === 'hosted'); }
   function applyProfileText() {
-    const t = I18N[currentLang], hosted = statsData && statsData.profile === 'hosted';
-    document.getElementById('hint').textContent = hosted ? t.hintHosted : t.hint;
-    document.getElementById('footer').textContent = hosted ? t.footerHosted : t.footer;
+    // Until /stats answers (seconds, on a cold serverless start), claim neither build: the
+    // hint without the CPU warning and no footer, rather than a flash of the wrong one.
+    const t = I18N[currentLang], known = !!statsData, hosted = isHosted();
+    document.getElementById('hint').textContent = (hosted || !known) ? t.hintHosted : t.hint;
+    document.getElementById('footer').textContent = !known ? '' : (hosted ? t.footerHosted : t.footer);
+  }
+  // "Is uvicorn running?" helps whoever runs the local build; a visitor to the public demo
+  // can't act on it, so they get "try again in a minute" instead.
+  function errorText(m) {
+    const t = I18N[currentLang];
+    return (isHosted() ? t.errorHosted : t.error)(m);
   }
   function setLang(lang) {
     const t = I18N[lang];
@@ -637,9 +658,10 @@
     try {
       const resp = await fetch('/ask/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }), signal: abortCtrl.signal });
       if (resp.status === 429) {
-        // Public-demo quota (see agroteca.quota): the server explains which limit was hit.
+        // Public-demo quota (see agroteca.quota): the server says which limit was hit (`reason`),
+        // shown in the page's language; its English `detail` covers any reason added later.
         let detail = 'HTTP 429';
-        try { detail = (await resp.json()).detail || detail; } catch (_) {}
+        try { const b = await resp.json(); detail = I18N[currentLang].quota[b.reason] || b.detail || detail; } catch (_) {}
         const err = new Error(detail); err.quota = true; throw err;
       }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -682,7 +704,8 @@
           } else if (msg.type === 'error') {
             const cur = answer.querySelector('.cursor'); if (cur) cur.remove();
             const st = document.getElementById('stats'); if (st) st.remove();
-            answer.textContent = I18N[currentLang].error(msg.message);
+            // A busy rejection is an expected state, not a fault: say so in the page's language.
+            answer.textContent = msg.reason === 'busy' ? I18N[currentLang].busy : errorText(msg.message);
           }
         }
       }
@@ -694,7 +717,7 @@
         const note = '<div class="stopped">■ ' + I18N[currentLang].stopped + '</div>';
         if (main) main.insertAdjacentHTML('beforeend', note); else answer.innerHTML = note;
       } else if (e.quota) { answer.textContent = e.message; }
-      else { answer.textContent = I18N[currentLang].error(e.message); }
+      else { answer.textContent = errorText(e.message); }
     } finally {
       clearInterval(elapsedTimer); ask.disabled = false; abortCtrl = null;
     }
