@@ -2,11 +2,15 @@
 
 [![CI](https://github.com/Zautzik/Agroteca/actions/workflows/ci.yml/badge.svg)](https://github.com/Zautzik/Agroteca/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An eval-first Retrieval-Augmented Generation (RAG) pipeline achieving 0.75 retrieval@5 accuracy via hybrid search and cross-encoder reranking.
+An eval-first Retrieval-Augmented Generation (RAG) pipeline achieving 0.80 retrieval@5 accuracy via hybrid search, cross-encoder reranking and bilingual query translation.
 
-Retrieval@5 (defined precisely in [Benchmark Results](#benchmark-results-measured) below) is scored against a 22-question golden set written *before* the retriever existed, over a bilingual (ES/EN) agricultural document corpus. Every stage of the cascade — dense, hybrid, reranked — is a measured line in [`eval/results.csv`](eval/results.csv), not an internal estimate. The same discipline extends to serving: an async connection pool sized and load-bearing under FastAPI's dependency injection, and explicit model warmup that pays CUDA/VRAM initialization once at process start instead of on a user's first request.
+**[Try it live →](https://agroteca.vercel.app)** A free public deployment of the same retrieval pipeline, serving only the open-license part of the corpus: measured live over HTTP at 0.70 retrieval@5, against a 0.85 ceiling for what it can legally serve. Every answer cites its source — or says it doesn't know.
 
-**Stack:** Python · FastAPI · Postgres + pgvector · Postgres full-text search · `sentence-transformers` / `transformers` (PyTorch, CUDA) · a multilingual cross-encoder reranker · Ollama (self-hosted LLM) · `psycopg_pool` · Docker · `uv`.
+Retrieval@5 (defined precisely in [Benchmark Results](#benchmark-results-measured) below) is scored against a 22-question golden set written *before* the retriever existed, over a bilingual (ES/EN) agricultural document corpus. Every stage of the cascade — dense, hybrid, reranked, translated — and the live demo itself is a measured line in [`eval/results.csv`](eval/results.csv), not an internal estimate. The same discipline extends to serving: an async connection pool sized and load-bearing under FastAPI's dependency injection, and explicit model warmup that pays CUDA/VRAM initialization once at process start instead of on a user's first request.
+
+**Stack (reference build, self-hosted):** Python · FastAPI · Postgres + pgvector · Postgres full-text search · `sentence-transformers` / `transformers` (PyTorch, CUDA) · a multilingual cross-encoder reranker · Ollama (self-hosted LLM) · `psycopg_pool` · Docker · `uv`.
+
+**Stack (public demo, free tiers):** Vercel (serverless FastAPI) · Neon (Postgres + pgvector) · the same embedder through ONNX Runtime · the same reranker through Jina's API · generation through Groq · parity-checked against the reference build ([`results/parity.md`](results/parity.md)).
 
 ---
 
@@ -64,7 +68,7 @@ def load_and_warm() -> None:
 
 ### Retrieval Cascade
 
-Each stage exists to fix the previous stage's blind spot: dense (pgvector cosine kNN) understands paraphrase but misses exact codes (`WL-323`); lexical (Postgres full-text search, `ts_rank_cd`) nails exact codes but misses paraphrase; Reciprocal Rank Fusion combines both rankings by position (sidestepping their incomparable score scales); a cross-encoder reranker reads each `(query, chunk)` pair *together* over the fused top-20 to sharpen precision before generation. Retrieval-only latency and accuracy are measurable independently of generation via a dedicated `/retrieve` endpoint (no LLM call) — see [API Surface](#api-surface).
+Each stage exists to fix the previous stage's blind spot: dense (pgvector cosine kNN) understands paraphrase but misses exact codes (`WL-323`); lexical (Postgres full-text search, `ts_rank_cd`) nails exact codes but misses paraphrase; Reciprocal Rank Fusion combines both rankings by position (sidestepping their incomparable score scales); a cross-encoder reranker reads each `(query, chunk)` pair *together* over the fused top-20 to sharpen precision before generation. Because the corpus mixes Spanish and English, the question is also retrieved in translation (ES↔EN): the two candidate pools are merged, and each chunk keeps the higher of its two reranker scores, so an English answer earns its score from the English question and a Spanish one from the Spanish. Retrieval-only latency and accuracy are measurable independently of generation via a dedicated `/retrieve` endpoint (no LLM call) — see [API Surface](#api-surface).
 
 ---
 
@@ -76,20 +80,24 @@ Retrieval@5 = *answer-chunk@5*: did the top-5 results contain a chunk that is bo
 |---|---|---|---|---|
 | Dense only (pgvector cosine kNN) | 0.35 | 0.30 | 0.65 | 0.33 |
 | + Lexical, fused with RRF (hybrid) | 0.45 | 0.15 | 0.65 | 0.25 |
-| **+ Cross-encoder reranking (final)** | **0.75** | **0.75** | **0.90** | **0.75** |
-| — same cascade, deployable corpus only¹ | 0.65 | — | 0.75 | — |
+| + Cross-encoder reranking | 0.75 | 0.75 | 0.90 | 0.75 |
+| **+ Bilingual query translation (the served config)** | **0.80** | **0.80** | **0.90** | **0.80** |
+| — reranked cascade, deployable corpus only¹ | 0.65 | — | 0.75 | — |
+| — **live public demo**, measured over HTTP² | **0.70** | — | — | — |
 
-¹ Excludes the copyrighted local-only tier (~30% of the index), which a public deployment cannot legally serve — the number above is what an actual production deployment measures, not the full-index figure. Same cascade, zero regressions; the gap is corpus size, not a retrieval regression. Full breakdown: [`eval/results.csv`](eval/results.csv), `deploy` row.
+¹ Excludes the copyrighted local-only tier (~30% of the index), which a public deployment cannot legally serve. Same cascade, zero regressions; the gap is corpus size, not a retrieval regression. Full breakdown: [`eval/results.csv`](eval/results.csv), `deploy` row.
 
-Reranking fixed six questions the earlier stages missed with **zero regressions**. `retrieval@5` alone hides the sharper story: `answer@1` and `MRR@5` jump `0.15 → 0.75` — whenever the answer is present in the fused pool, the reranker pins it to rank 1. (Hybrid's `answer@1` *dips below* dense's 0.30: equal-weight RRF trades top-1 precision for pool recall, which is exactly what the reranker exists to repair.)
+² The deployable corpus plus query translation, on the public demo's own runtimes (ONNX embedder, Jina rerank API, Groq translator), scored by [`eval/eval_pipeline.py`](eval/eval_pipeline.py) against [agroteca.vercel.app](https://agroteca.vercel.app) itself: 14/20, 0 errors, p50 2.1 s per retrieval ([`results/hosted_eval.md`](results/hosted_eval.md)). Three golden answers exist only in copyrighted books the demo can't serve, so its ceiling is 17/20 = 0.85; it gets 14 of the 17 it legally can. Against the deployable baseline (0.65), translation adds the same cross-lingual recovery measured locally. Full breakdown: [`eval/results.csv`](eval/results.csv), `hosted` row.
 
-A negative result kept in the record rather than discarded: a controlled `e5-large` (1024-dim) full re-index *doubled* dense-only recall (0.35 → 0.75) but moved the final cascade number by only one question (0.75 → 0.80, within n=20 noise) — the cross-encoder had been masking a weak embedder the whole time. The upgrade was not shipped (8× query latency, a schema migration, for a noise-level final gain); the finding was kept. Full writeup: [`eval/results.csv`](eval/results.csv), `experiment` rows.
+Reranking fixed six questions the earlier stages missed with **zero regressions**. `retrieval@5` alone hides the sharper story: `answer@1` and `MRR@5` jump `0.15 → 0.75` — whenever the answer is present in the fused pool, the reranker pins it to rank 1. (Hybrid's `answer@1` *dips below* dense's 0.30: equal-weight RRF trades top-1 precision for pool recall, which is exactly what the reranker exists to repair.) Query translation then recovered a cross-lingual miss (q08) that had survived three embedder configurations, again with zero regressions ([`eval/query_translation.py`](eval/query_translation.py), `serving` row) — the same 0.80 as the embedder upgrade below, with no re-index.
+
+A negative result kept in the record rather than discarded: a controlled `e5-large` (1024-dim) full re-index *doubled* dense-only recall (0.35 → 0.75) but moved the reranked cascade's number by only one question (0.75 → 0.80, within n=20 noise) — the cross-encoder had been masking a weak embedder the whole time. The upgrade was not shipped (8× query latency, a schema migration, for a noise-level final gain); the finding was kept. Full writeup: [`eval/results.csv`](eval/results.csv), `experiment` rows.
 
 ---
 
 ## Deployment: Fully Containerized
 
-Two profiles run the same models. The containerized GPU stack below is the measured reference. A free public demo (`AGROTECA_PROFILE=hosted`: Neon, the same embedder through ONNX Runtime, the same reranker through Jina's API, generation through Groq) is described in [`DEPLOY.md`](DEPLOY.md#public-demo-at-0-agroteca_profilehosted), including the parity check it must pass first.
+Two profiles run the same retrieval models. The containerized GPU stack below is the measured reference. A free public demo (`AGROTECA_PROFILE=hosted`: Neon, the same embedder through ONNX Runtime, the same reranker through Jina's API, generation through Groq) is described in [`DEPLOY.md`](DEPLOY.md#public-demo-at-0-agroteca_profilehosted), including the parity check it must pass first.
 
 ```bash
 docker compose up -d
