@@ -129,7 +129,8 @@ async def stats(conn: AsyncConnection = Depends(get_conn)):
     chunks = (await (await conn.execute("SELECT count(*) FROM chunks")).fetchone())[0]
     docs = (await (await conn.execute("SELECT count(*) FROM documents")).fetchone())[0]
     tiers = (await (await conn.execute("SELECT count(DISTINCT tier) FROM chunks")).fetchone())[0]
-    return {"chunks": chunks, "documents": docs, "tiers": tiers}
+    # profile lets the UI describe the build honestly (offline local vs the public cloud demo).
+    return {"chunks": chunks, "documents": docs, "tiers": tiers, "profile": settings.profile}
 
 
 _QUOTA_MESSAGES = {
@@ -205,7 +206,7 @@ async def retrieve(payload: Question, request: Request, conn: AsyncConnection = 
     try:
         rows, meta, retrieval_ms, translated = await retrieve_ranked_async(conn, payload.question)
     except TorchWorkerBusy as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=503)
+        return JSONResponse({"detail": str(exc), "reason": "busy"}, status_code=503)
     sources = [
         RetrievedChunk(chunk_id=cid, source_file=sf, tier=meta.get(cid, ("?", None))[0],
                        page=meta.get(cid, ("?", None))[1], score=round(sc, 4), text=text)
@@ -259,7 +260,8 @@ async def ask_stream(payload: Question, request: Request):
                     else:
                         rows, meta, retrieval_ms, translated = value
         except TorchWorkerBusy as exc:
-            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+            # `reason` lets the UI show a localized "busy, try again" instead of a raw error.
+            yield json.dumps({"type": "error", "reason": "busy", "message": str(exc)}) + "\n"
             return
         meta_line, context = build_meta_and_context(rows, meta, retrieval_ms, translated)
         yield meta_line

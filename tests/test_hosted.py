@@ -449,3 +449,78 @@ def test_retrieve_returns_503_not_500_when_the_reranker_is_busy(monkeypatch):
     finally:
         api.app.dependency_overrides.clear()
     assert resp.status_code == 503 and "busy" in resp.json()["detail"]
+    assert resp.json()["reason"] == "busy"
+
+
+def test_ask_stream_busy_is_a_tagged_error_frame_the_ui_can_localize(monkeypatch):
+    """The stream has already sent its 200 by the time reranking runs, so a busy rejection is
+    an NDJSON error frame. It carries reason="busy" so the page can say "busy, try again in a
+    minute" in its own language instead of showing a raw error."""
+    from fastapi.testclient import TestClient
+    from agroteca import api
+    from agroteca.retrieve.rerank import RerankerBusy
+
+    async def busy(conn, question):
+        raise RerankerBusy("The demo is busy right now")
+        yield  # pragma: no cover -- makes this an async generator, like the real one
+
+    async def no_quota(request):
+        return None
+
+    class FakePool:
+        def connection(self):
+            class _Ctx:
+                async def __aenter__(self_inner):
+                    return object()
+
+                async def __aexit__(self_inner, *a):
+                    return False
+            return _Ctx()
+
+    monkeypatch.setattr(api, "retrieve_ranked_with_progress", busy)
+    monkeypatch.setattr(api, "_quota_rejection", no_quota)
+    api.app.state.pool = FakePool()
+    resp = TestClient(api.app).post("/ask/stream", json={"question": "hola"})
+    frames = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    assert resp.status_code == 200
+    assert frames == [{"type": "error", "reason": "busy", "message": "The demo is busy right now"}]
+
+
+def test_public_demo_page_never_tells_visitors_to_check_uvicorn():
+    """The page's error copy: the local build may suggest checking the server, the hosted demo
+    must not (a visitor can't act on it), and busy/quota states exist in both languages."""
+    from agroteca import api
+
+    page = (Path(api.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    for line in page.splitlines():
+        if "errorHosted:" in line:
+            assert "uvicorn" not in line
+    for key in ("errorHosted:", "busy:", "daily_cap:", "ip_cap:"):
+        assert page.count(key) == 2, key           # one Spanish, one English
+    assert "(isHosted() ? t.errorHosted : t.error)" in page
+    assert "msg.reason === 'busy'" in page
+    assert "!known ? ''" in page                   # no footer claim until /stats says which build
+
+
+def test_stats_reports_the_profile_so_the_ui_never_claims_offline_when_hosted(monkeypatch):
+    from fastapi.testclient import TestClient
+    from agroteca import api
+
+    class Cur:
+        async def fetchone(self):
+            return (7,)
+
+    class Conn:
+        async def execute(self, sql, params=None):
+            return Cur()
+
+    async def fake_conn():
+        yield Conn()
+
+    monkeypatch.setattr(api.settings, "profile", "hosted")
+    api.app.dependency_overrides[api.get_conn] = fake_conn
+    try:
+        body = TestClient(api.app).get("/stats").json()
+    finally:
+        api.app.dependency_overrides.clear()
+    assert body == {"chunks": 7, "documents": 7, "tiers": 7, "profile": "hosted"}
